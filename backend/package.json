@@ -1,14 +1,26 @@
 {
-"name": "powdercoaterp-backend",
-"version": "1.0.0",
-"type": "module",
-"scripts": {
-"dev": "node server.js",
-"seed": "node seed.js"
-},
-"dependencies": {
-"better-sqlite3": "^9.0.0",
-"cors": "^2.8.5",
-"express": "^4.19.2"
-}
+  "name": "powdercoaterp-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "powdercoaterp-backend": "server.js"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "pkg": {
+    "assets": [
+      "routes/**/*",
+      "db.js",
+      "schema.sql",
+      "../frontend/**/*"
+    ]
+  }
 }

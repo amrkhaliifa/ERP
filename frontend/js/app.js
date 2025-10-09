@@ -1,126 +1,995 @@
 const API = "/api";
 
 async function json(url, opts = {}) {
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const controller = new AbortController();
+  const timeout = opts.timeout || 10000;
+  const _opts = { signal: controller.signal, ...opts };
+
+  // Only set Content-Type when sending a body
+  if (_opts.body) {
+    _opts.headers = {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    };
+  } else if (opts.headers) {
+    _opts.headers = opts.headers;
+  }
+
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, _opts);
+    clearTimeout(timer);
+
+    // No content
+    if (res.status === 204) return null;
+
+    const text = await res.text();
+    if (!text) {
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+      return null;
+    }
+
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+
+    if (!res.ok) {
+      const msg =
+        (body && body.error) ||
+        (typeof body === "string" && body) ||
+        res.statusText ||
+        `HTTP ${res.status}`;
+      const e = new Error(msg);
+      e.status = res.status;
+      throw e;
+    }
+    return body;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+// --- add: centralized refresh helper ---
+async function refreshAll() {
+  // run independent loaders in parallel, but keep Clients -> order-client select in case it depends
+  // run clients first to ensure order client select can use them if needed
+  try {
+    await loadClients();
+  } catch (e) {
+    console.warn("loadClients failed", e);
+  }
+
+  await Promise.all([
+    (async () => {
+      try {
+        await loadClientsForOrder();
+      } catch (e) {
+        console.warn("loadClientsForOrder failed", e);
+      }
+    })(),
+    (async () => {
+      try {
+        await loadProducts();
+      } catch (e) {
+        console.warn("loadProducts failed", e);
+      }
+    })(),
+    (async () => {
+      try {
+        await loadProductsForOrder();
+      } catch (e) {
+        console.warn("loadProductsForOrder failed", e);
+      }
+    })(),
+    (async () => {
+      try {
+        await loadOrders();
+      } catch (e) {
+        console.warn("loadOrders failed", e);
+      }
+    })(),
+    (async () => {
+      try {
+        await loadOutstanding();
+      } catch (e) {
+        console.warn("loadOutstanding failed", e);
+      }
+    })(),
+  ]);
 }
 
 // Tabs
-const tabs = document.querySelectorAll('#tabs .nav-link');
-tabs.forEach(btn => btn.addEventListener('click', () => {
-tabs.forEach(b => b.classList.remove('active'));
-btn.classList.add('active');
-document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-document.querySelector(btn.dataset.target).classList.add('active');
-}));
+const tabs = document.querySelectorAll("#tabs .nav-link");
+tabs.forEach((btn) =>
+  btn.addEventListener("click", async () => {
+    tabs.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    document
+      .querySelectorAll(".tab-pane")
+      .forEach((p) => p.classList.remove("active"));
+    const target = document.querySelector(btn.dataset.target);
+    if (target) target.classList.add("active");
 
-// Clients
-const clientForm = document.getElementById('clientForm');
-clientForm.addEventListener('submit', async (e) => {
-e.preventDefault();
-const fd = new FormData(clientForm);
-await json(`${API}/clients`, { method: 'POST', body: JSON.stringify(Object.fromEntries(fd)) });
-clientForm.reset();
-loadClients();
-loadClientsForOrder();
-});
+    // call loader for target pane
+    try {
+      const id = (btn.dataset.target || "").replace("#", "");
+      if (id === "clients") await loadClients();
+      else if (id === "inventory") await loadProducts();
+      else if (id === "orders") await loadOrders();
+      else if (id === "reports") {
+        await loadOutstanding();
+        // optionally keep profit data unchanged until user requests
+      }
+      // always refresh selects used across tabs
+      await loadClientsForOrder().catch(() => {});
+      await loadProductsForOrder().catch(() => {});
+    } catch (e) {
+      console.warn("pane load failed", e);
+    }
+  })
+);
 
-async function loadClients() {
-  const rows = await json(`${API}/clients`);
-  const tbody = document.querySelector("#clientsTable tbody");
-  tbody.innerHTML = rows
-    .map(
-      (r) =>
-        `<tr><td>${r.id}</td><td>${r.name}</td><td>${r.phone || ""}</td><td>${
-          r.address || ""
-        }</td></tr>`
-    )
-    .join("");
+// Add Clients
+const clientForm = document.getElementById("clientForm");
+if (clientForm) {
+  clientForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(clientForm);
+    await json(`${API}/clients`, {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(fd)),
+    });
+    clientForm.reset();
+    await refreshAll();
+  });
+} else {
+  console.warn("clientForm not found in DOM.");
 }
 
+// Clients List
+async function loadClients() {
+  try {
+    const rows = await json(`${API}/clients`);
+    // fetch orders to compute purchases per client
+    let orders = [];
+    try {
+      orders = await json(`${API}/orders`);
+    } catch {
+      orders = [];
+    }
+
+    const counts = {};
+    (orders || []).forEach((o) => {
+      // resolve client id from possible shapes
+      let cid = null;
+      if (o.client && typeof o.client === "object") {
+        cid = o.client.id ?? o.clientId ?? o.client_id;
+      } else if (o.client) {
+        // could be numeric string or number
+        cid = o.clientId ?? o.client_id ?? o.client;
+      } else {
+        cid = o.clientId ?? o.client_id ?? o.client;
+      }
+      cid = parseInt(cid);
+      if (!Number.isNaN(cid)) counts[cid] = (counts[cid] || 0) + 1;
+    });
+
+    let table = document.getElementById("clientsTable");
+    if (!table) return;
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+    }
+
+    tbody.innerHTML = (rows || [])
+      .map((r) => {
+        const purchases = counts[r.id] || 0;
+        return `<tr>
+            <td>${r.id}</td>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${r.phone || ""}</td>
+            <td>${r.address || ""}</td>
+            <td>${purchases}</td>
+            <td>
+              <div class="row g-2">
+                <div class="col-md-3 d-grid">
+                  <button class="btn btn-outline-primary" onclick="editClient(${
+                    r.id
+                  })">Edit</button>
+                </div>
+                <div class="col-md-3 d-grid">
+                  <button class="btn btn-outline-danger" onclick="deleteClient(${
+                    r.id
+                  })">Delete</button>
+                </div>
+              </div>
+            </td>
+          </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    console.error("Failed to load clients:", err);
+    alert(err.message || "Failed to load clients");
+  }
+}
+
+// Delete client
+async function deleteClient(id) {
+  if (!confirm("Are you sure you want to delete this client?")) return;
+  try {
+    await json(`${API}/clients/${id}`, { method: "DELETE" });
+  } catch (err) {
+    // show error to user
+    alert(err.message || "Failed to delete client");
+  } finally {
+    // always refresh lists so UI stays consistent
+    await refreshAll();
+  }
+}
+
+// Edit client (modal)
+function attachEditModalHandlers(modal) {
+  if (!modal) return;
+  const form = modal.querySelector("#editClientForm");
+  // dismiss buttons (X / Cancel / backdrop)
+  modal.querySelectorAll("[data-dismiss='modal']").forEach((el) => {
+    // avoid double-registering
+    if (el.dataset.wiredDismiss) return;
+    el.addEventListener("click", () => {
+      modal.classList.remove("show");
+      modal.setAttribute("aria-hidden", "true");
+    });
+    el.dataset.wiredDismiss = "1";
+  });
+
+  // backdrop click should close
+  const backdrop = modal.querySelector(".modal-backdrop");
+  if (backdrop && !backdrop.dataset.wiredBackdrop) {
+    backdrop.addEventListener("click", () => {
+      modal.classList.remove("show");
+      modal.setAttribute("aria-hidden", "true");
+    });
+    backdrop.dataset.wiredBackdrop = "1";
+  }
+
+  // submit handler for the edit form
+  if (form && !form.dataset.wiredSubmit) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const id = fd.get("id");
+      if (!id) {
+        alert("Missing client id.");
+        return;
+      }
+      try {
+        await json(`${API}/clients/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(Object.fromEntries(fd)),
+          headers: { "Content-Type": "application/json" },
+        });
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+        await refreshAll();
+      } catch (err) {
+        alert(err.message || "Failed to update client.");
+      }
+    });
+    form.dataset.wiredSubmit = "1";
+  }
+}
+// Show edit client modal
+async function editClient(id) {
+  try {
+    const clientToEdit = await json(`${API}/clients/${id}`);
+
+    // find existing modal/form (page may include them)
+    let modal = document.getElementById("editClientModal");
+    let form = document.getElementById("editClientForm");
+
+    // if no modal in DOM, create it (keeps markup out of HTML if you prefer)
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "editClientModal";
+      modal.className = "modal";
+      modal.innerHTML = `
+        <div class="modal-backdrop" data-dismiss="modal"></div>
+        <div class="modal-content" role="dialog" aria-modal="true">
+          <header class="modal-header">
+            <h3>Edit Client</h3>
+            <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+          </header>
+          <form id="editClientForm" class="modal-body">
+            <input type="hidden" id="editClientId" name="id">
+            <div class="form-row">
+              <label for="editClientName">Name</label>
+              <input type="text" id="editClientName" name="name" required>
+            </div>
+            <div class="form-row">
+              <label for="editClientPhone">Phone</label>
+              <input type="text" id="editClientPhone" name="phone">
+            </div>
+            <div class="form-row">
+              <label for="editClientAddress">Address</label>
+              <input type="text" id="editClientAddress" name="address">
+            </div>
+            <footer class="modal-footer">
+              <button type="submit" class="btn btn-primary">Save</button>
+              <button type="button" class="btn btn-outline-warning" data-dismiss="modal">Cancel</button>
+            </footer>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      form = document.getElementById("editClientForm");
+    }
+
+    // ensure handlers are attached (works for modal provided in HTML or created above)
+    attachEditModalHandlers(modal);
+
+    // populate inputs
+    const idInput = document.getElementById("editClientId");
+    const nameInput = document.getElementById("editClientName");
+    const phoneInput = document.getElementById("editClientPhone");
+    const addrInput = document.getElementById("editClientAddress");
+
+    if (!idInput || !nameInput || !phoneInput || !addrInput) {
+      alert("Failed to initialize edit form inputs.");
+      return;
+    }
+
+    idInput.value = clientToEdit.id ?? "";
+    nameInput.value = clientToEdit.name ?? "";
+    phoneInput.value = clientToEdit.phone ?? "";
+    addrInput.value = clientToEdit.address ?? "";
+
+    // show modal
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+  } catch (err) {
+    alert(err.message || "Failed to load client for editing.");
+  }
+}
+
+// Load clients into order form select
 async function loadClientsForOrder() {
   const rows = await json(`${API}/clients`);
   const sel = document.getElementById("orderClient");
-  sel.innerHTML = rows
-    .map((r) => `<option value="${r.id}">${r.name}</option>`)
-    .join("");
+  if (!sel) return;
+  // keep the placeholder option, then append real options
+  const placeholder = `<option value="" selected disabled>Select client</option>`;
+  sel.innerHTML =
+    placeholder +
+    (rows || [])
+      .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
+      .join("");
+}
+
+async function loadProductsForOrder() {
+  const rows = await json(`${API}/products`);
+  const sel = document.getElementById("orderProduct");
+  if (!sel) return;
+  const placeholder = `<option value="" selected disabled>Select product</option>`;
+  sel.innerHTML =
+    placeholder +
+    (rows || [])
+      .map(
+        (p) =>
+          `<option value="${p.id}" data-name="${escapeHtml(
+            p.name
+          )}" data-unit="${escapeHtml(p.unit || "")}" data-cost-price="${p.cost_price || 0}" data-price="${p.default_sale_price || 0}">${escapeHtml(p.name)}</option>`
+      )
+      .join("");
 }
 
 // Products
-const productForm = document.getElementById('productForm');
-productForm.addEventListener('submit', async (e) => {
-e.preventDefault();
-const fd = new FormData(productForm);
-const data = Object.fromEntries(fd);
-['cost_price','default_sale_price'].forEach(k => data[k] = parseFloat(data[k]||0));
-await json(`${API}/products`, { method: 'POST', body: JSON.stringify(data) });
-productForm.reset();
-loadProducts();
-});
-
 
 async function loadProducts() {
-const rows = await json(`${API}/products`);
-const tbody = document.querySelector('#productsTable tbody');
-tbody.innerHTML = rows.map(p => `<tr><td>${p.id}</td><td>${p.name}</td><td>${p.color||''}</td><td>${p.unit||''}</td><td>${p.cost_price}</td><td>${p.default_sale_price}</td><td>${p.stock_qty}</td></tr>`).join('');
-}
+  const rows = await json(`${API}/products`);
+  let table = document.getElementById("productsTable");
+  if (!table) return;
+  let tbody = table.querySelector("tbody");
+  if (!tbody) {
+    tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+  }
+  const lowStockThreshold = 100;
+  tbody.innerHTML = (rows || [])
+    .map((p) => {
+      const stockQty = Number(p.stock_qty ?? 0);
+      const stockClass =
+        stockQty <= lowStockThreshold ? "low-stock" : "normal-stock";
 
-// Orders
-const orderForm = document.getElementById('orderForm');
-orderForm.addEventListener('submit', async (e) => {
-e.preventDefault();
-const fd = new FormData(orderForm);
-const clientId = parseInt(fd.get('clientId')); const deposit = parseFloat(fd.get('deposit')||0);
-let items = [];
-try { items = JSON.parse(fd.get('items')||'[]'); } catch {}
-await json(`${API}/orders`, { method: 'POST', body: JSON.stringify({ clientId, deposit, items }) });
-orderForm.reset();
-loadOrders();
-loadProducts();
-});
-
-async function loadOrders() {
-  const rows = await json(`${API}/orders`);
-  const tbody = document.querySelector("#ordersTable tbody");
-  tbody.innerHTML = rows
-    .map((o) => {
-      const paid = o.total_paid;
-      const balance = o.subtotal - o.total_paid;
-      return `<tr><td>${o.id}</td><td>${
-        o.client_name
-      }</td><td>${o.subtotal.toFixed(2)}</td><td>${paid.toFixed(
-        2
-      )}</td><td>${balance.toFixed(2)}</td><td>${o.created_at}</td></tr>`;
+      return `<tr>
+        <td>${p.id}</td>
+        <td>${escapeHtml(p.name)}</td>
+        <td>${escapeHtml(p.color || "")}</td>
+        <td>${escapeHtml(p.unit || "")}</td>
+        <td>${Number(p.cost_price ?? 0).toFixed(2)}</td>
+        <td>${Number(p.default_sale_price ?? 0).toFixed(2)}</td>
+        <td class="${stockClass}">${stockQty}</td>
+        <td>
+          <div class="row g-2">
+            <div class="col-md-3 d-grid">
+              <button class="btn btn-outline-primary" onclick="editProduct(${
+                p.id
+              })">Edit</button>
+            </div>
+            <div class="col-md-3 d-grid">
+              <button class="btn btn-outline-danger" onclick="deleteProduct(${
+                p.id
+              })">Delete</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
     })
     .join("");
 }
 
-// Reports
-async function loadOutstanding() {
-const rows = await json(`${API}/reports/outstanding`);
-const tbody = document.querySelector('#outstandingTable tbody');
-tbody.innerHTML = rows.map(r => `<tr><td>${r.id}</td><td>${r.client}</td><td>${r.subtotal.toFixed(2)}</td><td>${r.paid.toFixed(2)}</td><td>${r.balance.toFixed(2)}</td><td>${r.created_at}</td></tr>`).join('');
+// editProduct: populate productForm for editing
+async function editProduct(id) {
+  try {
+    const p = await json(`${API}/products/${id}`);
+    const form = document.getElementById("productForm");
+    if (!form) return alert("Product form not found.");
+    // ensure hidden id field exists
+    let idInput = form.querySelector("#editProductId");
+    if (!idInput) {
+      idInput = document.createElement("input");
+      idInput.type = "hidden";
+      idInput.id = "editProductId";
+      idInput.name = "id";
+      form.prepend(idInput);
+    }
+    idInput.value = p.id ?? "";
+
+    // populate known fields (by name)
+    const set = (name, value) => {
+      const el = form.querySelector(`[name="${name}"]`);
+      if (el) el.value = value ?? "";
+    };
+    set("name", p.name);
+    set("color", p.color || "");
+    set("unit", p.unit || "");
+    set("cost_price", p.cost_price ?? "");
+    set("default_sale_price", p.default_sale_price ?? "");
+    set("stock_qty", p.stock_qty ?? "");
+
+    // focus name for convenience
+    const nameEl = form.querySelector('[name="name"]');
+    if (nameEl) nameEl.focus();
+  } catch (err) {
+    alert(err.message || "Failed to load product for editing.");
+  }
+}
+
+// deleteProduct: call API then refresh
+async function deleteProduct(id) {
+  if (!confirm("Are you sure you want to delete this product?")) return;
+  try {
+    await json(`${API}/products/${id}`, { method: "DELETE" });
+    await refreshAll();
+  } catch (err) {
+    alert(err.message || "Failed to delete product.");
+  }
+}
+
+// update productForm submit to support create (POST) and update (PUT)
+const productForm = document.getElementById("productForm");
+if (productForm) {
+  // remove previously attached listener if any (best-effort)
+  try {
+    productForm.removeEventListener("submit", () => {});
+  } catch {}
+  productForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(productForm);
+    const data = Object.fromEntries(fd);
+    ["cost_price", "default_sale_price", "stock_qty"].forEach(
+      (k) => (data[k] = parseFloat(data[k] || 0))
+    );
+
+    // detect edit mode by hidden id field
+    const idInput = productForm.querySelector("#editProductId");
+    try {
+      if (idInput && idInput.value) {
+        // update
+        const id = idInput.value;
+        await json(`${API}/products/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+          headers: { "Content-Type": "application/json" },
+        });
+        // remove edit marker
+        idInput.remove();
+      } else {
+        // create
+        await json(`${API}/products`, {
+          method: "POST",
+          body: JSON.stringify(data),
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      productForm.reset();
+      await refreshAll();
+    } catch (err) {
+      alert(err.message || "Failed to save product.");
+    }
+  });
+}
+
+// Orders
+let orderItems = [];
+
+function renderOrderItems() {
+  const tbody = document.querySelector("#orderItemsTable tbody");
+  tbody.innerHTML = orderItems
+    .map(
+      (it, idx) =>
+        `<tr data-idx="${idx}">
+          <td>${escapeHtml(it.name || "")}</td>
+          <td>${it.qty}</td>
+          <td>${escapeHtml(it.unit || "")}</td>
+          <td>${formatCurrency(it.cost_price || 0)}</td>
+          <td>${formatCurrency(it.price || 0)}</td>
+          <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-item" data-idx="${idx}">Remove</button></td>
+        </tr>`
+    )
+    .join("");
+
+  // Update total
+  const total = orderItems.reduce((sum, i) => sum + i.qty * (i.price || 0), 0);
+  const totalCell = document.getElementById("orderTotal");
+  if (totalCell) totalCell.textContent = formatCurrency(total);
+
+  // keep hidden input in sync
+  const itemsInput = document.getElementById("items");
+  if (itemsInput)
+    itemsInput.value = JSON.stringify(
+      orderItems.map((i) => ({ productId: i.productId, qty: i.qty }))
+    );
+}
+
+function escapeHtml(s = "") {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
+        c
+      ])
+  );
 }
 
 
-document.getElementById('loadProfit').addEventListener('click', async () => {
-const from = document.getElementById('from').value;
-const to = document.getElementById('to').value;
-const qs = new URLSearchParams({ ...(from?{from}:{}) , ...(to?{to}:{}) }).toString();
-const data = await json(`${API}/reports/profit${qs ? '?' + qs : ''}`);
-const d = data.totals;
-document.getElementById('profitTotals').innerHTML = `<div class="alert alert-info">Orders: <b>${d.count}</b> — Revenue: <b>${d.revenue.toFixed(2)}</b> — Cost: <b>${d.cost.toFixed(2)}</b> — Profit: <b>${d.profit.toFixed(2)}</b></div>`;
-});
 
-// Init
-(async function init(){
-await loadClients();
-await loadClientsForOrder();
-await loadProducts();
-await loadOrders();
-await loadOutstanding();
-})();
+// add item button handler
+const addItemBtn = document.getElementById("addItemBtn");
+if (addItemBtn) {
+  addItemBtn.addEventListener("click", () => {
+    const prodSel = document.getElementById("orderProduct");
+    const qtyEl = document.getElementById("orderQty");
+    if (!prodSel || !qtyEl)
+      return alert("Product selector or quantity missing.");
+    const productId = parseInt(prodSel.value);
+    if (!productId) return alert("Select a product.");
+    const name =
+      prodSel.options[prodSel.selectedIndex]?.dataset?.name ||
+      prodSel.options[prodSel.selectedIndex]?.text;
+    const qty = Math.max(1, parseFloat(qtyEl.value || 1));
+    const unit = prodSel.options[prodSel.selectedIndex]?.dataset?.unit || "";
+    const cost_price = parseFloat(prodSel.selectedOptions[0].dataset.costPrice || 0);
+    const price = parseFloat(prodSel.selectedOptions[0].dataset.price || 0);
+    const existing = orderItems.find((i) => i.productId === productId);
+    if (existing) {
+      existing.qty += qty;
+    } else {
+      orderItems.push({ productId, name, qty, unit, cost_price, price });
+    }
+    renderOrderItems();
+  });
+}
+
+// remove item via delegation
+const orderItemsTable = document.getElementById("orderItemsTable");
+if (orderItemsTable) {
+  orderItemsTable.addEventListener("click", (ev) => {
+    if (!ev.target.matches(".remove-item")) return;
+    const idx = Number(ev.target.dataset.idx);
+    if (Number.isFinite(idx)) {
+      orderItems.splice(idx, 1);
+      renderOrderItems();
+    }
+  });
+}
+
+// Adjust order submit to prefer in-memory orderItems if present
+// replace earlier orderForm submit handler (the one that parses items)
+const orderForm = document.getElementById("orderForm");
+if (!orderForm) {
+  console.warn("orderForm not found in DOM.");
+} else {
+  // remove any previous listeners if needed, then attach new
+  orderForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const fd = new FormData(orderForm);
+
+      // clientId
+      let clientId = fd.get("clientId");
+      if (!clientId) {
+        const sel = document.getElementById("orderClient");
+        clientId = sel ? sel.value : null;
+      }
+      clientId = parseInt(clientId);
+      if (!clientId || Number.isNaN(clientId)) {
+        alert("Please select a client for the order.");
+        return;
+      }
+
+      // deposit
+      let deposit = fd.get("deposit");
+      if (deposit == null) {
+        const depEl = document.getElementById("deposit");
+        deposit = depEl ? depEl.value : "0";
+      }
+      deposit = parseFloat(deposit || 0);
+
+      // items: prefer in-memory orderItems, fallback to hidden input / FormData
+      let items = [];
+      if (orderItems && orderItems.length) {
+        items = orderItems.map((it) => ({
+          productId: it.productId,
+          qty: it.qty,
+        }));
+      } else {
+        const itemsRaw =
+          fd.get("items") || document.getElementById("items")?.value || "[]";
+        try {
+          items = JSON.parse(itemsRaw);
+        } catch {
+          items = [];
+        }
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        alert("No items in the order. Add at least one product.");
+        return;
+      }
+
+      // normalize
+      items = items
+        .map((it) => ({
+          productId: parseInt(it.productId),
+          qty: parseFloat(it.qty || 0),
+        }))
+        .filter((it) => it.productId && it.qty > 0);
+
+      if (items.length === 0) {
+        alert("No valid items found for the order.");
+        return;
+      }
+
+      await json(`${API}/orders`, {
+        method: "POST",
+        body: JSON.stringify({ clientId, deposit, items }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      // clear UI and internal items
+      orderForm.reset();
+      orderItems = [];
+      renderOrderItems();
+      await refreshAll();
+    } catch (err) {
+      alert(err.message || "Failed to create order.");
+    }
+  });
+}
+
+// helper formatters
+function formatCurrency(v) {
+  if (v == null || Number.isNaN(Number(v))) return "0.00";
+  return Number(v).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+function formatDate(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (isNaN(dt)) return String(d);
+  return dt.toLocaleString();
+}
+
+// Orders list loader
+async function loadOrders() {
+  try {
+    const rows = await json(`${API}/orders`);
+    const table = document.getElementById("ordersTable");
+    if (!table) return;
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+    }
+
+    const calcPaid = (r) => {
+      if (r == null) return 0;
+      if (r.paid != null) return Number(r.paid) || 0;
+      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
+      if (r.payments_total != null) return Number(r.payments_total) || 0;
+      // payments array: sum possible keys
+      if (Array.isArray(r.payments) && r.payments.length) {
+        return r.payments.reduce(
+          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+          0
+        );
+      }
+      // sometimes payments embedded under 'payments' as object with total
+      if (
+        r.payments &&
+        typeof r.payments === "object" &&
+        r.payments.total != null
+      )
+        return Number(r.payments.total) || 0;
+      return 0;
+    };
+
+    tbody.innerHTML = (rows || [])
+      .map((r) => {
+        const id = r.id ?? r.orderId ?? "";
+        // resolve client name from possible shapes
+        let clientName = "";
+        if (r.client) {
+          if (typeof r.client === "string") clientName = r.client;
+          else if (typeof r.client === "object")
+            clientName =
+              r.client.name ??
+              r.client.clientName ??
+              r.clientName ??
+              r.client.fullName ??
+              "";
+          else clientName = String(r.client);
+        }
+        clientName = clientName || r.clientName || r.client_name || "";
+
+        const subtotal = Number(r.subtotal ?? r.total ?? r.amount ?? 0);
+        const paid = calcPaid(r);
+        const balance = Number((r.balance ?? subtotal - paid) || 0);
+        const date = r.created_at ?? r.date ?? r.createdAt ?? r.created ?? "";
+
+        return `<tr>
+          <td>${id}</td>
+          <td>${escapeHtml(clientName)}</td>
+          <td>${formatCurrency(subtotal)}</td>
+          <td>${formatCurrency(paid)}</td>
+          <td>${formatCurrency(balance)}</td>
+          <td>${formatDate(date)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    //calculate total after rendering rows
+    const totalAmount = (rows || []).reduce((sum, r) => {
+      const subtotal = Number(r.subtotal ?? r.total ?? r.amount ?? 0);
+      return sum + subtotal;
+    }, 0);
+
+    //render tfoot once
+    let tfoot = table.querySelector("tfoot");
+    if (!tfoot) {
+      tfoot = document.createElement("tfoot");
+      table.appendChild(tfoot);
+    }
+    tfoot.innerHTML = `
+<tr>
+  <td colspan="2" class="text-end fw-light">Total:</td>
+  <td class="fw-light">${formatCurrency(totalAmount)}</td>
+  <td colspan="3"></td>
+</tr>`;
+  } catch (err) {
+    console.error("Failed to load orders:", err);
+    alert(err.message || "Failed to load orders");
+  }
+}
+
+// Reports
+async function loadOutstanding() {
+  try {
+    const rows = await json(`${API}/reports/outstanding`);
+    const table = document.getElementById("outstandingTable");
+    if (!table) return;
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+    }
+
+    const calcPaid = (r) => {
+      if (r == null) return 0;
+      if (r.paid != null) return Number(r.paid) || 0;
+      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
+      if (r.payments_total != null) return Number(r.payments_total) || 0;
+      if (Array.isArray(r.payments) && r.payments.length) {
+        return r.payments.reduce(
+          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+          0
+        );
+      }
+      if (
+        r.payments &&
+        typeof r.payments === "object" &&
+        r.payments.total != null
+      )
+        return Number(r.payments.total) || 0;
+      return 0;
+    };
+
+    tbody.innerHTML = (rows || [])
+      .map(
+        (r) =>
+          `<tr>
+            <td>${r.id ?? ""}</td>
+            <td>${escapeHtml(r.client ?? r.clientName ?? "")}</td>
+            <td>${Number(r.subtotal ?? 0).toFixed(2)}</td>
+            <td>${Number(calcPaid(r)).toFixed(2)}</td>
+            <td>${Number(
+              r.balance ?? Number(r.subtotal ?? 0) - calcPaid(r)
+            ).toFixed(2)}</td>
+            <td>${escapeHtml(r.created_at ?? r.date ?? "")}</td>
+          </tr>`
+      )
+      .join("");
+  } catch (err) {
+    console.error("Failed to load outstanding:", err);
+  }
+}
+
+// Reports: client selector + per-client orders view
+async function loadReportClients() {
+  try {
+    const sel = document.getElementById("reportClient");
+    if (!sel) return;
+    const rows = await json(`${API}/clients`);
+    sel.innerHTML =
+      `<option value="">All clients</option>` +
+      (rows || [])
+        .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+        .join("");
+    sel.removeEventListener("change", onReportClientChange);
+    sel.addEventListener("change", onReportClientChange);
+  } catch (err) {
+    console.warn("loadReportClients failed", err);
+  }
+}
+
+async function onReportClientChange() {
+  const sel = document.getElementById("reportClient");
+  if (!sel) return;
+  const cid = sel.value;
+  if (!cid) {
+    // show aggregated/outstanding view when no client selected
+    await loadOutstanding();
+    return;
+  }
+  await loadClientOrders(parseInt(cid, 10));
+}
+
+async function loadClientOrders(clientId) {
+  try {
+    const orders = await json(`${API}/orders`);
+    const table = document.getElementById("outstandingTable");
+    if (!table) return;
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+    }
+
+    const filtered = (orders || []).filter((o) => {
+      let cid = null;
+      if (o.client && typeof o.client === "object")
+        cid = o.client.id ?? o.clientId ?? o.client_id;
+      else cid = o.clientId ?? o.client_id ?? o.client;
+      return String(cid) === String(clientId);
+    });
+
+    const calcPaid = (r) => {
+      if (r == null) return 0;
+      if (r.paid != null) return Number(r.paid) || 0;
+      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
+      if (r.payments_total != null) return Number(r.payments_total) || 0;
+      if (Array.isArray(r.payments) && r.payments.length) {
+        return r.payments.reduce(
+          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+          0
+        );
+      }
+      if (
+        r.payments &&
+        typeof r.payments === "object" &&
+        r.payments.total != null
+      )
+        return Number(r.payments.total) || 0;
+      return 0;
+    };
+
+    tbody.innerHTML = (filtered || [])
+      .map((r) => {
+        const id = r.id ?? r.orderId ?? "";
+        // resolve client name
+        let clientName = "";
+        if (r.client) {
+          if (typeof r.client === "string") clientName = r.client;
+          else if (typeof r.client === "object")
+            clientName = r.client.name ?? r.clientName ?? "";
+        }
+        clientName = clientName || r.clientName || "";
+
+        const subtotal = Number(r.subtotal ?? r.total ?? 0);
+        const paid = calcPaid(r);
+        const balance = Number(r.balance ?? subtotal - paid);
+        const date = r.created_at ?? r.date ?? r.createdAt ?? "";
+        return `<tr>
+          <td>${id}</td>
+          <td>${escapeHtml(clientName)}</td>
+          <td>${formatCurrency(subtotal)}</td>
+          <td>${formatCurrency(paid)}</td>
+          <td>${formatCurrency(balance)}</td>
+          <td>${formatDate(date)}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    console.error("loadClientOrders failed", err);
+  }
+}
+
+const loadProfitBtn = document.getElementById("loadProfit");
+if (loadProfitBtn) {
+  loadProfitBtn.addEventListener("click", async () => {
+    const from = document.getElementById("from")?.value;
+    const to = document.getElementById("to")?.value;
+    const qs = new URLSearchParams({
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    }).toString();
+    try {
+      const data = await json(`${API}/reports/profit${qs ? "?" + qs : ""}`);
+      const d = data.totals || { count: 0, revenue: 0, cost: 0, profit: 0 };
+      const el = document.getElementById("profitTotals");
+      if (el) {
+        el.innerHTML = `<div class="alert alert-info">Orders: <b>${
+          d.count
+        }</b> — Revenue: <b>${(d.revenue || 0).toFixed(2)}</b> — Cost: <b>${(
+          d.cost || 0
+        ).toFixed(2)}</b> — Profit: <b>${(d.profit || 0).toFixed(2)}</b></div>`;
+      }
+    } catch (err) {
+      console.warn("loadProfit failed", err);
+      alert(err.message || "Failed to load profit");
+    }
+  });
+} else {
+  console.warn("loadProfit button not found in DOM.");
+}
+
+// Init - run after DOM ready so element lookups succeed
+document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    await refreshAll();
+  } catch (e) {
+    console.warn("refreshAll failed on DOMContentLoaded", e);
+  }
+  try {
+    await loadReportClients();
+  } catch (e) {
+    console.warn("loadReportClients failed on DOMContentLoaded", e);
+  }
+});

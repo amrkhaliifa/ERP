@@ -31,19 +31,52 @@
                             <th>Name</th>
                             <th>Phone</th>
                             <th>Address</th>
+                            <th>Total Orders</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
                 </table>
             </div>
-
+<div id="editClientModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-dismiss="modal"></div>
+    <div class="modal-content" role="dialog" aria-modal="true">
+        <header class="modal-header">
+            <h3>Edit Client</h3>
+            <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+        </header>
+        <form id="editClientForm" class="modal-body">
+            <input type="hidden" id="editClientId" name="id">
+            <div class="form-row">
+                <label for="editClientName">Name</label>
+                <input type="text" id="editClientName" name="name" required>
+            </div>
+            <div class="form-row">
+                <label for="editClientPhone">Phone</label>
+                <input type="text" id="editClientPhone" name="phone">
+            </div>
+            <div class="form-row">
+                <label for="editClientAddress">Address</label>
+                <input type="text" id="editClientAddress" name="address">
+            </div>
+            <footer class="modal-footer">
+                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-warning" data-dismiss="modal">Cancel</button>
+            </footer>
+        </form>
+    </div>
+</div>
 
             <div id="inventory" class="tab-pane">
                 <h5>Add/Update Product</h5>
                 <form id="productForm" class="row g-2">
                     <div class="col-md-3"><input class="form-control" name="name" placeholder="Name" required /></div>
                     <div class="col-md-2"><input class="form-control" name="color" placeholder="Color (RAL)" /></div>
-                    <div class="col-md-2"><input class="form-control" name="unit" placeholder="Unit (piece/kg)" /></div>
+                    <div class="col-md-2"><select class="form-select" name="unit" id="productUnitSelect" aria-label="Unit">
+                        <option value="" selected disabled>Choose unit</option>
+                        <option value="Piece">Piece</option>
+                        <option value="Kg">Kg</option>
+                        </select></div>
+                      
                     <div class="col-md-2"><input class="form-control" name="cost_price" type="number" step="0.01" placeholder="Cost" />
                     </div>
                     <div class="col-md-2"><input class="form-control" name="default_sale_price" type="number" step="0.01" placeholder="Sale" /></div>
@@ -71,12 +104,54 @@
             <div id="orders" class="tab-pane">
                 <h5>New Order</h5>
                 <form id="orderForm" class="row g-2">
-                    <div class="col-md-3"><select class="form-select" name="clientId" id="orderClient"></select></div>
-                    <div class="col-md-3"><input class="form-control" name="deposit" type="number" step="0.01"
-                            placeholder="Deposit" /></div>
-                    <div class="col-md-4"><input class="form-control" name="items"
-                            placeholder='Items JSON e.g. [{"productId":1,"qty":2}]' /></div>
-                    <div class="col-md-2 d-grid"><button class="btn btn-success">Create</button></div>
+                    <div class="col-md-4">
+                        <label for="orderClient" class="form-label">Client</label>
+                        <select id="orderClient" name="clientId" class="form-select"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="orderProduct" class="form-label">Product</label>
+                        <select id="orderProduct" name="productId" class="form-select"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="orderQty" class="form-label">Qty</label>
+                        <input type="number" id="orderQty" class="form-control" value="1" min="1">
+                    </div>
+                    <div class="col-md-2 d-grid align-self-end">
+                        <button type="button" id="addItemBtn" class="btn btn-secondary">Add Item</button>
+                    </div>
+
+                    <div class="col-12">
+                        <table class="table table-sm" id="orderItemsTable">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Qty</th>
+                                    <th>Unit</th>
+                                    <th>Cost</th>
+                                    <th>Price</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="4" class="text-end fw-light">Order Total:</td>
+                                    <td id="orderTotal" class="fw-light">0.00</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    <div class="col-md-3">
+                        <label for="deposit" class="form-label">Deposit</label>
+                        <input type="number" step="0.01" id="deposit" name="deposit" class="form-control" value="0">
+                    </div>
+
+                    <!-- hidden JSON backup of items -->
+                    <input type="hidden" id="items" name="items" value="[]">
+
+                    <div class="col-12 d-grid">
+                        <button type="submit" class="btn btn-primary">Create Order</button>
+                    </div>
                 </form>
                 <hr />
                 <table class="table table-sm" id="ordersTable">
@@ -97,6 +172,12 @@
 
             <div id="reports" class="tab-pane">
                 <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label for="reportClient" class="form-label">Client</label>
+                        <select id="reportClient" class="form-select">
+                        <option value="">All clients</option>
+                        </select>
+                    </div>
                     <div class="col-md-3"><input class="form-control" id="from" type="date" /></div>
                     <div class="col-md-3"><input class="form-control" id="to" type="date" /></div>
                     <div class="col-md-3 d-grid"><button id="loadProfit" class="btn btn-outline-primary">Load

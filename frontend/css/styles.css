@@ -6,3 +6,97 @@ body {
 .table th {
     vertical-align: middle;
 }
+
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.modal.show {
+    display: flex;
+    pointer-events: auto;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 10000; /* backdrop below content */
+    pointer-events: auto; /* allow clicks to close modal (handled by JS) */
+}
+
+.modal-content {
+    position: relative;
+    max-width: 480px;
+    width: 92%;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    z-index: 10001; /* ensure content is above backdrop */
+    pointer-events: auto; /* allow interacting with form controls */
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+    background: #f8f9fa;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+
+.modal-body {
+    padding: 12px 16px;
+    display: block;
+}
+
+.form-row {
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-row label {
+    font-size: .85rem;
+    margin-bottom: 4px;
+    color: #333;
+}
+
+.form-row input[type="text"],
+.form-row input[type="hidden"],
+.form-row input[type="number"],
+.form-row input[type="email"] {
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 10px 16px;
+    border-top: 1px solid #eee;
+    background: #fafafa;
+}
+
+.low-stock {
+    color: red !important;
+    font-weight: bold;
+}
+
+.normal-stock {
+    color: green;
+}

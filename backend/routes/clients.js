@@ -44,11 +44,50 @@ r.put("/:id", (req, res) => {
 });
 
 r.delete("/:id", (req, res) => {
-  const info = db
-    .prepare("DELETE FROM clients WHERE id = ?")
-    .run(req.params.id);
-  if (!info.changes) return res.status(404).json({ error: "Not found" });
-  res.status(204).end();
+  const clientId = parseInt(req.params.id, 10);
+  if (!clientId) return res.status(400).json({ error: "Invalid client id" });
+
+  const tableExists = (name) =>
+    !!db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?")
+      .get(name);
+
+  const tx = db.transaction((cid) => {
+    // get all order ids for client
+    const orders = db
+      .prepare("SELECT id FROM orders WHERE client_id = ?")
+      .all(cid);
+    const orderIds = orders.map((o) => o.id);
+
+    if (orderIds.length) {
+      // delete payments linked to each order (if payments table exists)
+      if (tableExists("payments")) {
+        const delPay = db.prepare("DELETE FROM payments WHERE order_id = ?");
+        for (const oid of orderIds) delPay.run(oid);
+      }
+      // delete order_items / items if present
+      if (tableExists("order_items")) {
+        const delItems = db.prepare(
+          "DELETE FROM order_items WHERE order_id = ?"
+        );
+        for (const oid of orderIds) delItems.run(oid);
+      }
+      // delete orders
+      const delOrder = db.prepare("DELETE FROM orders WHERE id = ?");
+      for (const oid of orderIds) delOrder.run(oid);
+    }
+
+    // finally delete client
+    db.prepare("DELETE FROM clients WHERE id = ?").run(cid);
+  });
+
+  try {
+    tx(clientId);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to delete client:", err);
+    return res.status(500).json({ error: String(err) });
+  }
 });
 
 export default r;
