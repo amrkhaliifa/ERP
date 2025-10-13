@@ -382,7 +382,11 @@ async function loadProductsForOrder() {
         (p) =>
           `<option value="${p.id}" data-name="${escapeHtml(
             p.name
-          )}" data-unit="${escapeHtml(p.unit || "")}" data-cost-price="${p.cost_price || 0}" data-price="${p.default_sale_price || 0}">${escapeHtml(p.name)}</option>`
+          )}" data-unit="${escapeHtml(p.unit || "")}" data-cost-price="${
+            p.cost_price || 0
+          }" data-price="${p.default_sale_price || 0}">${escapeHtml(
+            p.name
+          )}</option>`
       )
       .join("");
 }
@@ -567,8 +571,6 @@ function escapeHtml(s = "") {
   );
 }
 
-
-
 // add item button handler
 const addItemBtn = document.getElementById("addItemBtn");
 if (addItemBtn) {
@@ -584,7 +586,9 @@ if (addItemBtn) {
       prodSel.options[prodSel.selectedIndex]?.text;
     const qty = Math.max(1, parseFloat(qtyEl.value || 1));
     const unit = prodSel.options[prodSel.selectedIndex]?.dataset?.unit || "";
-    const cost_price = parseFloat(prodSel.selectedOptions[0].dataset.costPrice || 0);
+    const cost_price = parseFloat(
+      prodSel.selectedOptions[0].dataset.costPrice || 0
+    );
     const price = parseFloat(prodSel.selectedOptions[0].dataset.price || 0);
     const existing = orderItems.find((i) => i.productId === productId);
     if (existing) {
@@ -676,9 +680,16 @@ if (!orderForm) {
         return;
       }
 
+      // paymentMethod
+      let paymentMethod = fd.get("paymentMethod");
+      if (!paymentMethod) {
+        const pmEl = document.getElementById("paymentMethod");
+        paymentMethod = pmEl ? pmEl.value : "Cash";
+      }
+
       await json(`${API}/orders`, {
         method: "POST",
-        body: JSON.stringify({ clientId, deposit, items }),
+        body: JSON.stringify({ clientId, deposit, items, paymentMethod }),
         headers: { "Content-Type": "application/json" },
       });
 
@@ -711,8 +722,7 @@ function formatDate(d) {
 // Orders list loader
 async function loadOrders(dateFilter = currentOrderDateFilter) {
   try {
-    const url = dateFilter ? `${API}/orders?date=${encodeURIComponent(dateFilter)}` : `${API}/orders`;
-    const rows = await json(url);
+    const rows = await json(`${API}/orders${dateFilter ? `?date=${dateFilter}` : ""}`);
     const table = document.getElementById("ordersTable");
     if (!table) return;
     let tbody = table.querySelector("tbody");
@@ -721,29 +731,6 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
       table.appendChild(tbody);
     }
 
-    const calcPaid = (r) => {
-      if (r == null) return 0;
-      if (r.total_paid != null) return Number(r.total_paid) || 0;
-      if (r.paid != null) return Number(r.paid) || 0;
-      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
-      if (r.payments_total != null) return Number(r.payments_total) || 0;
-      // payments array: sum possible keys
-      if (Array.isArray(r.payments) && r.payments.length) {
-        return r.payments.reduce(
-          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
-          0
-        );
-      }
-      // sometimes payments embedded under 'payments' as object with total
-      if (
-        r.payments &&
-        typeof r.payments === "object" &&
-        r.payments.total != null
-      )
-        return Number(r.payments.total) || 0;
-      return 0;
-    };
-
     let totalSubtotal = 0;
     let totalPaid = 0;
     let totalBalance = 0;
@@ -751,31 +738,19 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
     tbody.innerHTML = (rows || [])
       .map((r) => {
         const id = r.id ?? r.orderId ?? "";
-        // resolve client name from possible shapes
-        let clientName = "";
-        if (r.client) {
-          if (typeof r.client === "string") clientName = r.client;
-          else if (typeof r.client === "object")
-            clientName =
-              r.client.name ??
-              r.client.clientName ??
-              r.clientName ??
-              r.client.fullName ??
-              "";
-          else clientName = String(r.client);
-        }
-        clientName = clientName || r.clientName || r.client_name || "";
+        const clientName = r.clientName ?? r.client_name ?? r.client ?? "Unknown";
+        const subtotal = Number(r.subtotal ?? r.total ?? 0);
+        const paid = Number(r.total_paid ?? r.paid ?? 0);
+        const balance = paid - subtotal; // Calculate balance as negative if unpaid
+        const date = r.created_at ?? r.date ?? "Unknown";
 
-        const subtotal = Number(r.subtotal ?? r.total ?? r.amount ?? 0);
-        const paid = calcPaid(r);
-        const balance = Number((r.balance ?? subtotal - paid) || 0);
-        const date = r.created_at ?? r.date ?? r.createdAt ?? r.created ?? "";
-
+        // Accumulate totals
         totalSubtotal += subtotal;
         totalPaid += paid;
         totalBalance += balance;
 
-        const balanceClass = balance < 0 ? 'text-danger' : '';
+        // Apply red color for negative balance (unpaid)
+        const balanceClass = balance < 0 ? "text-danger" : "";
 
         return `<tr>
           <td>${id}</td>
@@ -784,15 +759,17 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
           <td>${formatCurrency(paid)}</td>
           <td class="${balanceClass}">${formatCurrency(balance)}</td>
           <td>${formatDate(date)}</td>
-          <td><button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button></td>
+          <td>
+            <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
+          </td>
         </tr>`;
       })
       .join("");
 
     // Update tfoot totals
-    document.getElementById('totalSubtotal').textContent = formatCurrency(totalSubtotal);
-    document.getElementById('totalPaid').textContent = formatCurrency(totalPaid);
-    document.getElementById('totalBalance').textContent = formatCurrency(totalBalance);
+    document.getElementById("totalSubtotal").textContent = formatCurrency(totalSubtotal);
+    document.getElementById("totalPaid").textContent = formatCurrency(totalPaid);
+    document.getElementById("totalBalance").textContent = formatCurrency(totalBalance);
   } catch (err) {
     console.error("Failed to load orders:", err);
     alert(err.message || "Failed to load orders");
@@ -833,17 +810,20 @@ async function loadOutstanding() {
 
     tbody.innerHTML = (rows || [])
       .map(
-        (r) =>
-          `<tr>
+        (r) => {
+          const subtotal = Number(r.subtotal ?? 0);
+          const paid = calcPaid(r);
+          const balance = Number(r.balance ?? paid - subtotal);
+          const balanceClass = balance < 0 ? "text-danger" : "";
+          return `<tr>
             <td>${r.id ?? ""}</td>
             <td>${escapeHtml(r.client ?? r.clientName ?? "")}</td>
-            <td>${Number(r.subtotal ?? 0).toFixed(2)}</td>
-            <td>${Number(calcPaid(r)).toFixed(2)}</td>
-            <td>${Number(
-              r.balance ?? Number(r.subtotal ?? 0) - calcPaid(r)
-            ).toFixed(2)}</td>
+            <td>${subtotal.toFixed(2)}</td>
+            <td>${paid.toFixed(2)}</td>
+            <td class="${balanceClass}">${balance.toFixed(2)}</td>
             <td>${escapeHtml(r.created_at ?? r.date ?? "")}</td>
-          </tr>`
+          </tr>`;
+        }
       )
       .join("");
   } catch (err) {
@@ -934,14 +914,15 @@ async function loadClientOrders(clientId) {
 
         const subtotal = Number(r.subtotal ?? r.total ?? 0);
         const paid = calcPaid(r);
-        const balance = Number(r.balance ?? subtotal - paid);
+        const balance = Number(r.balance ?? paid - subtotal);
+        const balanceClass = balance < 0 ? "text-danger" : "";
         const date = r.created_at ?? r.date ?? r.createdAt ?? "";
         return `<tr>
           <td>${id}</td>
           <td>${escapeHtml(clientName)}</td>
           <td>${formatCurrency(subtotal)}</td>
           <td>${formatCurrency(paid)}</td>
-          <td>${formatCurrency(balance)}</td>
+          <td class="${balanceClass}">${formatCurrency(balance)}</td>
           <td>${formatDate(date)}</td>
         </tr>`;
       })
@@ -1035,9 +1016,11 @@ async function viewOrder(orderId) {
       let clientName = "";
       if (order.client) {
         if (typeof order.client === "string") clientName = order.client;
-        else if (typeof order.client === "object") clientName = order.client.name ?? order.client.clientName ?? "";
+        else if (typeof order.client === "object")
+          clientName = order.client.name ?? order.client.clientName ?? "";
       }
-      clientName = clientName || order.clientName || order.client_name || "Unknown";
+      clientName =
+        clientName || order.clientName || order.client_name || "Unknown";
 
       const subtotal = Number(order.subtotal ?? order.total ?? 0);
       const calcPaid = (r) => {
@@ -1046,9 +1029,17 @@ async function viewOrder(orderId) {
         if (r.paid_amount != null) return Number(r.paid_amount) || 0;
         if (r.payments_total != null) return Number(r.payments_total) || 0;
         if (Array.isArray(r.payments) && r.payments.length) {
-          return r.payments.reduce((s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0), 0);
+          return r.payments.reduce(
+            (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+            0
+          );
         }
-        if (r.payments && typeof r.payments === "object" && r.payments.total != null) return Number(r.payments.total) || 0;
+        if (
+          r.payments &&
+          typeof r.payments === "object" &&
+          r.payments.total != null
+        )
+          return Number(r.payments.total) || 0;
         return 0;
       };
       const paid = calcPaid(order);
@@ -1072,7 +1063,9 @@ async function viewOrder(orderId) {
             <strong>Paid:</strong> ${formatCurrency(paid)}
           </div>
           <div class="col-md-4">
-            <strong>Balance:</strong> <span class="${balance < 0 ? 'text-danger' : ''}">${formatCurrency(balance)}</span>
+            <strong>Balance:</strong> <span class="${
+              balance < 0 ? "text-danger" : ""
+            }">${formatCurrency(balance)}</span>
           </div>
         </div>
         <h5>Order Items</h5>
@@ -1088,19 +1081,33 @@ async function viewOrder(orderId) {
             </tr>
           </thead>
           <tbody>
-            ${Array.isArray(order.items) ? order.items.map(item => `
+            ${
+              Array.isArray(order.items)
+                ? order.items
+                    .map(
+                      (item) => `
               <tr>
                 <td>${escapeHtml(item.product_name || item.name || "")}</td>
                 <td>${item.qty || 0}</td>
                 <td>${escapeHtml(item.unit || "")}</td>
-                <td>${formatCurrency(item.unit_cost_snapshot || item.cost_price || 0)}</td>
+                <td>${formatCurrency(
+                  item.unit_cost_snapshot || item.cost_price || 0
+                )}</td>
                 <td>${formatCurrency(item.unit_price || 0)}</td>
-                <td>${formatCurrency((item.qty || 0) * (item.unit_price || 0))}</td>
+                <td>${formatCurrency(
+                  (item.qty || 0) * (item.unit_price || 0)
+                )}</td>
               </tr>
-            `).join("") : ""}
+            `
+                    )
+                    .join("")
+                : ""
+            }
           </tbody>
         </table>
-        ${Array.isArray(order.payments) && order.payments.length ? `
+        ${
+          Array.isArray(order.payments) && order.payments.length
+            ? `
           <h5>Payments</h5>
           <table class="table table-sm">
             <thead>
@@ -1111,16 +1118,26 @@ async function viewOrder(orderId) {
               </tr>
             </thead>
             <tbody>
-              ${order.payments.map(payment => `
+              ${order.payments
+                .map(
+                  (payment) => `
                 <tr>
-                  <td>${formatDate(payment.date ?? payment.created_at ?? payment.paid_at ?? "")}</td>
-                  <td>${formatCurrency(payment.amount ?? payment.paid ?? 0)}</td>
+                  <td>${formatDate(
+                    payment.date ?? payment.created_at ?? payment.paid_at ?? ""
+                  )}</td>
+                  <td>${formatCurrency(
+                    payment.amount ?? payment.paid ?? 0
+                  )}</td>
                   <td>${escapeHtml(payment.note ?? payment.method ?? "")}</td>
                 </tr>
-              `).join("")}
+              `
+                )
+                .join("")}
             </tbody>
           </table>
-        ` : ""}
+        `
+            : ""
+        }
       `;
     }
 
@@ -1142,13 +1159,15 @@ if (prevDayBtn) {
   prevDayBtn.addEventListener("click", () => {
     let current;
     if (currentOrderDateFilter) {
-      const [y, m, d] = currentOrderDateFilter.split('-').map(Number);
+      const [y, m, d] = currentOrderDateFilter.split("-").map(Number);
       current = new Date(y, m - 1, d);
     } else {
       current = new Date();
     }
     current.setDate(current.getDate() - 1);
-    currentOrderDateFilter = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+    currentOrderDateFilter = `${current.getFullYear()}-${String(
+      current.getMonth() + 1
+    ).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
     orderDateFilterInput.value = currentOrderDateFilter;
     loadOrders(currentOrderDateFilter);
   });
@@ -1158,13 +1177,15 @@ if (nextDayBtn) {
   nextDayBtn.addEventListener("click", () => {
     let current;
     if (currentOrderDateFilter) {
-      const [y, m, d] = currentOrderDateFilter.split('-').map(Number);
+      const [y, m, d] = currentOrderDateFilter.split("-").map(Number);
       current = new Date(y, m - 1, d);
     } else {
       current = new Date();
     }
     current.setDate(current.getDate() + 1);
-    currentOrderDateFilter = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+    currentOrderDateFilter = `${current.getFullYear()}-${String(
+      current.getMonth() + 1
+    ).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
     orderDateFilterInput.value = currentOrderDateFilter;
     loadOrders(currentOrderDateFilter);
   });
@@ -1182,6 +1203,29 @@ if (orderDateFilterInput) {
   orderDateFilterInput.addEventListener("change", () => {
     currentOrderDateFilter = orderDateFilterInput.value || null;
     loadOrders(currentOrderDateFilter);
+  });
+}
+
+// Payment method change handler
+const paymentMethodSel = document.getElementById("paymentMethod");
+if (paymentMethodSel) {
+  paymentMethodSel.addEventListener("change", () => {
+    const method = paymentMethodSel.value;
+    const depositEl = document.getElementById("deposit");
+    const depositLabel = document.getElementById("depositLabel");
+    if (method === "Cash") {
+      depositLabel.textContent = "Deposit";
+      const total =
+        parseFloat(
+          document
+            .getElementById("orderTotal")
+            .textContent.replace(/[^0-9.-]/g, "")
+        ) || 0;
+      depositEl.value = total.toFixed(2);
+    } else if (method === "Installment") {
+      depositLabel.textContent = "Down Payment";
+      depositEl.value = "0";
+    }
   });
 }
 

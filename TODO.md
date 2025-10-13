@@ -27,3 +27,11 @@
 - [x] Test basic CRUD operations for clients, products, and orders
 - [x] Test date filtering functionality
 - [x] Test discount calculation and final total display
+
+# TODO: Add Payment Method Column to Orders Table
+
+- [x] Add "Payment Method" column header to orders table in frontend/index.html
+- [x] Update loadOrders function in frontend/js/app.js to display payment_method in the table row
+- [x] Adjust tfoot colspan to account for new column
+- [x] Add logic to display balance as negative for Installment payment method
+- [x] Test the payment method display in the orders table

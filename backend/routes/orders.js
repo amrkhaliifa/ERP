@@ -65,10 +65,11 @@ ro.get("/:id", (req, res) => {
 });
 
 ro.post("/", (req, res) => {
-  const { clientId, items = [], deposit = 0 } = req.body;
+  const { clientId, items = [], deposit = 0, paymentMethod } = req.body;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items required" });
+  if (!paymentMethod) return res.status(400).json({ error: "paymentMethod required" });
 
   const client = db3
     .prepare("SELECT id FROM clients WHERE id = ?")
@@ -77,11 +78,12 @@ ro.post("/", (req, res) => {
 
   const trx = db3.transaction(() => {
     const insOrder = db3.prepare(
-      "INSERT INTO orders(client_id, deposit_paid, total_paid) VALUES (?, ?, 0)"
+      "INSERT INTO orders(client_id, deposit_paid, total_paid, payment_method) VALUES (?, ?, 0, ?)"
     );
     const orderId = insOrder.run(
       clientId,
-      Number(deposit || 0)
+      Number(deposit || 0),
+      paymentMethod
     ).lastInsertRowid;
 
     const insItem = db3.prepare(

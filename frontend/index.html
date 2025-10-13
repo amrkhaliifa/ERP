@@ -77,10 +77,10 @@
                         <option value="Kg">Kg</option>
                         </select></div>
                       
-                    <div class="col-md-2"><input class="form-control" name="cost_price" type="number" step="0.01" placeholder="Cost" />
+                    <div class="col-md-2"><input class="form-control" name="cost_price" type="number" step="1" placeholder="Cost" />
                     </div>
-                    <div class="col-md-2"><input class="form-control" name="default_sale_price" type="number" step="0.01" placeholder="Sale" /></div>
-                    <div class="col-md-2"><input class="form-control" name="stock_qty" type="number" step="0.01" placeholder="Stock" /></div>
+                    <div class="col-md-2"><input class="form-control" name="default_sale_price" type="number" step="1" placeholder="Sale" /></div>
+                    <div class="col-md-2"><input class="form-control" name="stock_qty" type="number" step="1" placeholder="Stock" /></div>
                     <div class="col-md-1 d-grid"><button class="btn btn-primary">Save</button></div>
                 </form>
                 <hr />
@@ -142,8 +142,15 @@
                     </div>
 
                     <div class="col-md-3">
-                        <label for="deposit" class="form-label">Deposit</label>
-                        <input type="number" step="0.01" id="deposit" name="deposit" class="form-control" value="0">
+                        <label for="paymentMethod" class="form-label">Payment Method</label>
+                        <select id="paymentMethod" name="paymentMethod" class="form-select" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Installment">Installment</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="deposit" class="form-label" id="depositLabel">Deposit</label>
+                        <input type="number" step="1" id="deposit" name="deposit" class="form-control" value="0">
                     </div>
 
                     <!-- hidden JSON backup of items -->
@@ -153,12 +160,11 @@
                         <button type="submit" class="btn btn-primary">Create Order</button>
                     </div>
                 </form>
-                <div class="row g-2 align-items-end mb-3">
+                <div class="row g-2 justify-content-center align-items-center mb-3 mt-3">
                     <div class="col-md-2 d-grid">
                         <button id="prevDay" class="btn btn-outline-secondary">Previous Day</button>
                     </div>
                     <div class="col-md-3">
-                        <label for="orderDateFilter" class="form-label">Filter by Date</label>
                         <input type="date" id="orderDateFilter" class="form-control">
                     </div>
                     <div class="col-md-2 d-grid">
@@ -187,7 +193,7 @@
                             <td colspan="2" class="text-end fw-bold">Total</td>
                             <td id="totalSubtotal" class="fw-bold"></td>
                             <td id="totalPaid" class="fw-bold"></td>
-                            <td id="totalBalance" class="fw-bold"></td>
+                            <td id="totalBalance" class="fw-bold text-danger"></td>
                             <td colspan="2"></td>
                         </tr>
                     </tfoot>
@@ -222,6 +228,15 @@
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2" class="text-end fw-bold">Total</td>
+                            <td id="reportTotalSubtotal" class="fw-bold"></td>
+                            <td id="reportTotalPaid" class="fw-bold"></td>
+                            <td id="reportTotalBalance" class="fw-bold text-danger"></td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>

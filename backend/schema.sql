@@ -24,6 +24,7 @@ subtotal REAL NOT NULL DEFAULT 0,
 deposit_paid REAL NOT NULL DEFAULT 0,
 total_paid REAL NOT NULL DEFAULT 0,
 estimated_cost REAL NOT NULL DEFAULT 0,
+payment_method TEXT NOT NULL DEFAULT 'Cash',
 FOREIGN KEY (client_id) REFERENCES clients(id)
 );
 
