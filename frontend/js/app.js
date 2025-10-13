@@ -526,6 +526,7 @@ if (productForm) {
 
 // Orders
 let orderItems = [];
+let currentOrderDateFilter = null;
 
 function renderOrderItems() {
   const tbody = document.querySelector("#orderItemsTable tbody");
@@ -708,9 +709,10 @@ function formatDate(d) {
 }
 
 // Orders list loader
-async function loadOrders() {
+async function loadOrders(dateFilter = currentOrderDateFilter) {
   try {
-    const rows = await json(`${API}/orders`);
+    const url = dateFilter ? `${API}/orders?date=${encodeURIComponent(dateFilter)}` : `${API}/orders`;
+    const rows = await json(url);
     const table = document.getElementById("ordersTable");
     if (!table) return;
     let tbody = table.querySelector("tbody");
@@ -721,6 +723,7 @@ async function loadOrders() {
 
     const calcPaid = (r) => {
       if (r == null) return 0;
+      if (r.total_paid != null) return Number(r.total_paid) || 0;
       if (r.paid != null) return Number(r.paid) || 0;
       if (r.paid_amount != null) return Number(r.paid_amount) || 0;
       if (r.payments_total != null) return Number(r.payments_total) || 0;
@@ -740,6 +743,10 @@ async function loadOrders() {
         return Number(r.payments.total) || 0;
       return 0;
     };
+
+    let totalSubtotal = 0;
+    let totalPaid = 0;
+    let totalBalance = 0;
 
     tbody.innerHTML = (rows || [])
       .map((r) => {
@@ -764,35 +771,28 @@ async function loadOrders() {
         const balance = Number((r.balance ?? subtotal - paid) || 0);
         const date = r.created_at ?? r.date ?? r.createdAt ?? r.created ?? "";
 
+        totalSubtotal += subtotal;
+        totalPaid += paid;
+        totalBalance += balance;
+
+        const balanceClass = balance < 0 ? 'text-danger' : '';
+
         return `<tr>
           <td>${id}</td>
           <td>${escapeHtml(clientName)}</td>
           <td>${formatCurrency(subtotal)}</td>
           <td>${formatCurrency(paid)}</td>
-          <td>${formatCurrency(balance)}</td>
+          <td class="${balanceClass}">${formatCurrency(balance)}</td>
           <td>${formatDate(date)}</td>
+          <td><button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button></td>
         </tr>`;
       })
       .join("");
 
-    //calculate total after rendering rows
-    const totalAmount = (rows || []).reduce((sum, r) => {
-      const subtotal = Number(r.subtotal ?? r.total ?? r.amount ?? 0);
-      return sum + subtotal;
-    }, 0);
-
-    //render tfoot once
-    let tfoot = table.querySelector("tfoot");
-    if (!tfoot) {
-      tfoot = document.createElement("tfoot");
-      table.appendChild(tfoot);
-    }
-    tfoot.innerHTML = `
-<tr>
-  <td colspan="2" class="text-end fw-light">Total:</td>
-  <td class="fw-light">${formatCurrency(totalAmount)}</td>
-  <td colspan="3"></td>
-</tr>`;
+    // Update tfoot totals
+    document.getElementById('totalSubtotal').textContent = formatCurrency(totalSubtotal);
+    document.getElementById('totalPaid').textContent = formatCurrency(totalPaid);
+    document.getElementById('totalBalance').textContent = formatCurrency(totalBalance);
   } catch (err) {
     console.error("Failed to load orders:", err);
     alert(err.message || "Failed to load orders");
@@ -978,6 +978,211 @@ if (loadProfitBtn) {
   });
 } else {
   console.warn("loadProfit button not found in DOM.");
+}
+
+// View order details in modal
+async function viewOrder(orderId) {
+  try {
+    const order = await json(`${API}/orders/${orderId}`);
+    if (!order) {
+      alert("Order not found.");
+      return;
+    }
+
+    // Create modal if not exists
+    let modal = document.getElementById("viewOrderModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "viewOrderModal";
+      modal.className = "modal";
+      modal.innerHTML = `
+        <div class="modal-backdrop" data-dismiss="modal"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" style="max-width: 800px;">
+          <header class="modal-header">
+            <h3>Order Details - #${orderId}</h3>
+            <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+          </header>
+          <div id="orderDetailsContent" class="modal-body">
+            <!-- Content will be populated here -->
+          </div>
+          <footer class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Close</button>
+          </footer>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      // Attach dismiss handlers
+      modal.querySelectorAll("[data-dismiss='modal']").forEach((el) => {
+        el.addEventListener("click", () => {
+          modal.classList.remove("show");
+          modal.setAttribute("aria-hidden", "true");
+        });
+      });
+      const backdrop = modal.querySelector(".modal-backdrop");
+      if (backdrop) {
+        backdrop.addEventListener("click", () => {
+          modal.classList.remove("show");
+          modal.setAttribute("aria-hidden", "true");
+        });
+      }
+    }
+
+    // Populate modal content
+    const content = document.getElementById("orderDetailsContent");
+    if (content) {
+      // Resolve client name
+      let clientName = "";
+      if (order.client) {
+        if (typeof order.client === "string") clientName = order.client;
+        else if (typeof order.client === "object") clientName = order.client.name ?? order.client.clientName ?? "";
+      }
+      clientName = clientName || order.clientName || order.client_name || "Unknown";
+
+      const subtotal = Number(order.subtotal ?? order.total ?? 0);
+      const calcPaid = (r) => {
+        if (r == null) return 0;
+        if (r.paid != null) return Number(r.paid) || 0;
+        if (r.paid_amount != null) return Number(r.paid_amount) || 0;
+        if (r.payments_total != null) return Number(r.payments_total) || 0;
+        if (Array.isArray(r.payments) && r.payments.length) {
+          return r.payments.reduce((s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0), 0);
+        }
+        if (r.payments && typeof r.payments === "object" && r.payments.total != null) return Number(r.payments.total) || 0;
+        return 0;
+      };
+      const paid = calcPaid(order);
+      const balance = Number(order.balance ?? subtotal - paid);
+      const date = order.created_at ?? order.date ?? order.createdAt ?? "";
+
+      content.innerHTML = `
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <strong>Client:</strong> ${escapeHtml(clientName)}
+          </div>
+          <div class="col-md-6">
+            <strong>Date:</strong> ${formatDate(date)}
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <strong>Subtotal:</strong> ${formatCurrency(subtotal)}
+          </div>
+          <div class="col-md-4">
+            <strong>Paid:</strong> ${formatCurrency(paid)}
+          </div>
+          <div class="col-md-4">
+            <strong>Balance:</strong> <span class="${balance < 0 ? 'text-danger' : ''}">${formatCurrency(balance)}</span>
+          </div>
+        </div>
+        <h5>Order Items</h5>
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Qty</th>
+              <th>Unit</th>
+              <th>Cost</th>
+              <th>Price</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Array.isArray(order.items) ? order.items.map(item => `
+              <tr>
+                <td>${escapeHtml(item.product_name || item.name || "")}</td>
+                <td>${item.qty || 0}</td>
+                <td>${escapeHtml(item.unit || "")}</td>
+                <td>${formatCurrency(item.unit_cost_snapshot || item.cost_price || 0)}</td>
+                <td>${formatCurrency(item.unit_price || 0)}</td>
+                <td>${formatCurrency((item.qty || 0) * (item.unit_price || 0))}</td>
+              </tr>
+            `).join("") : ""}
+          </tbody>
+        </table>
+        ${Array.isArray(order.payments) && order.payments.length ? `
+          <h5>Payments</h5>
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Method</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${order.payments.map(payment => `
+                <tr>
+                  <td>${formatDate(payment.date ?? payment.created_at ?? payment.paid_at ?? "")}</td>
+                  <td>${formatCurrency(payment.amount ?? payment.paid ?? 0)}</td>
+                  <td>${escapeHtml(payment.note ?? payment.method ?? "")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        ` : ""}
+      `;
+    }
+
+    // Show modal
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+  } catch (err) {
+    alert(err.message || "Failed to load order details.");
+  }
+}
+
+// Date filtering for orders
+const prevDayBtn = document.getElementById("prevDay");
+const nextDayBtn = document.getElementById("nextDay");
+const clearDateFilterBtn = document.getElementById("clearDateFilter");
+const orderDateFilterInput = document.getElementById("orderDateFilter");
+
+if (prevDayBtn) {
+  prevDayBtn.addEventListener("click", () => {
+    let current;
+    if (currentOrderDateFilter) {
+      const [y, m, d] = currentOrderDateFilter.split('-').map(Number);
+      current = new Date(y, m - 1, d);
+    } else {
+      current = new Date();
+    }
+    current.setDate(current.getDate() - 1);
+    currentOrderDateFilter = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+    orderDateFilterInput.value = currentOrderDateFilter;
+    loadOrders(currentOrderDateFilter);
+  });
+}
+
+if (nextDayBtn) {
+  nextDayBtn.addEventListener("click", () => {
+    let current;
+    if (currentOrderDateFilter) {
+      const [y, m, d] = currentOrderDateFilter.split('-').map(Number);
+      current = new Date(y, m - 1, d);
+    } else {
+      current = new Date();
+    }
+    current.setDate(current.getDate() + 1);
+    currentOrderDateFilter = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+    orderDateFilterInput.value = currentOrderDateFilter;
+    loadOrders(currentOrderDateFilter);
+  });
+}
+
+if (clearDateFilterBtn) {
+  clearDateFilterBtn.addEventListener("click", () => {
+    currentOrderDateFilter = null;
+    orderDateFilterInput.value = "";
+    loadOrders();
+  });
+}
+
+if (orderDateFilterInput) {
+  orderDateFilterInput.addEventListener("change", () => {
+    currentOrderDateFilter = orderDateFilterInput.value || null;
+    loadOrders(currentOrderDateFilter);
+  });
 }
 
 // Init - run after DOM ready so element lookups succeed

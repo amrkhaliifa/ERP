@@ -21,13 +21,27 @@ function recalcTotals(orderId) {
 }
 
 ro.get("/", (req, res) => {
-  const rows = db3
-    .prepare(
-      `SELECT o.*, c.name as client_name FROM orders o JOIN clients c ON c.id = o.client_id ORDER BY o.id DESC`
-    )
-    .all();
-  // lightweight; for full details, call /:id
-  res.json(rows);
+  const { date } = req.query;
+  let query = `SELECT o.*, c.name as client_name FROM orders o JOIN clients c ON c.id = o.client_id`;
+  const params = [];
+  if (date) {
+    query += ` WHERE DATE(o.created_at) = ?`;
+    params.push(date);
+  }
+  query += ` ORDER BY o.id DESC`;
+  const rows = db3.prepare(query).all(...params);
+
+  // Add items to each order for the list view
+  const ordersWithItems = rows.map(order => {
+    const items = db3
+      .prepare(
+        `SELECT oi.*, p.name AS product_name, p.color, p.unit FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`
+      )
+      .all(order.id);
+    return { ...order, items };
+  });
+
+  res.json(ordersWithItems);
 });
 
 ro.get("/:id", (req, res) => {

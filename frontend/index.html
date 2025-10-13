@@ -153,6 +153,21 @@
                         <button type="submit" class="btn btn-primary">Create Order</button>
                     </div>
                 </form>
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-2 d-grid">
+                        <button id="prevDay" class="btn btn-outline-secondary">Previous Day</button>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="orderDateFilter" class="form-label">Filter by Date</label>
+                        <input type="date" id="orderDateFilter" class="form-control">
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button id="nextDay" class="btn btn-outline-secondary">Next Day</button>
+                    </div>
+                    <div class="col-md-3 d-grid">
+                        <button id="clearDateFilter" class="btn btn-outline-secondary">Show All Orders</button>
+                    </div>
+                </div>
                 <hr />
                 <table class="table table-sm" id="ordersTable">
                     <thead>
@@ -163,9 +178,19 @@
                             <th>Paid</th>
                             <th>Balance</th>
                             <th>Date</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2" class="text-end fw-bold">Total</td>
+                            <td id="totalSubtotal" class="fw-bold"></td>
+                            <td id="totalPaid" class="fw-bold"></td>
+                            <td id="totalBalance" class="fw-bold"></td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 
