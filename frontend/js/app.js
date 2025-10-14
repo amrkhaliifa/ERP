@@ -777,7 +777,14 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
           <td>${escapeHtml(r.payment_method || "Cash")}</td>
           <td>${formatDate(date)}</td>
           <td>
-            <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
+            <div class="row g-1">
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-danger" onclick="refundOrder(${id})">Refund</button>
+              </div>
+            </div>
           </td>
         </tr>`;
       })
@@ -979,6 +986,18 @@ if (loadProfitBtn) {
   });
 } else {
   console.warn("loadProfit button not found in DOM.");
+}
+
+// Refund order
+async function refundOrder(orderId) {
+  if (!confirm("Are you sure you want to refund this order? This will restore inventory and delete the order.")) return;
+  try {
+    await json(`${API}/orders/${orderId}`, { method: "DELETE" });
+    alert("Order refunded successfully.");
+    await refreshAll();
+  } catch (err) {
+    alert(err.message || "Failed to refund order.");
+  }
 }
 
 // View order details in modal

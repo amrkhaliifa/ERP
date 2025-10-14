@@ -140,4 +140,41 @@ ro.post("/", (req, res) => {
   }
 });
 
+ro.delete("/:id", (req, res) => {
+  const orderId = req.params.id;
+  const order = db3.prepare("SELECT id FROM orders WHERE id = ?").get(orderId);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+
+  const trx = db3.transaction(() => {
+    // Get order items to restore stock
+    const items = db3
+      .prepare("SELECT product_id, qty FROM order_items WHERE order_id = ?")
+      .all(orderId);
+
+    // Restore stock for each product
+    const updStock = db3.prepare(
+      "UPDATE products SET stock_qty = stock_qty + ? WHERE id = ?"
+    );
+    for (const it of items) {
+      updStock.run(Number(it.qty), it.product_id);
+    }
+
+    // Delete payments
+    db3.prepare("DELETE FROM payments WHERE order_id = ?").run(orderId);
+
+    // Delete order items
+    db3.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
+
+    // Delete order
+    db3.prepare("DELETE FROM orders WHERE id = ?").run(orderId);
+  });
+
+  try {
+    trx();
+    res.json({ message: "Order refunded successfully" });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 export default ro;
