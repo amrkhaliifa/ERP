@@ -1,37 +1,27 @@
-# TODO: Add Date Filter for Orders
+# Add Discount Option to Orders
 
-- [x] Move date filter row in frontend/index.html to under the "Create Order" button
-- [x] Add global currentOrderDateFilter variable in frontend/js/app.js
-- [x] Modify loadOrders function to accept optional date parameter and use in API call
-- [x] Update calls to loadOrders to pass currentOrderDateFilter
-- [x] Add event listeners for date filter input and buttons
-- [x] Test the functionality by running the app
+## Backend Changes
+- [x] Update `backend/schema.sql`: Add `discount` column to `orders` table (REAL NOT NULL DEFAULT 0)
+- [x] Update `backend/routes/orders.js`:
+  - [x] Modify `recalcTotals` function if needed (balance calculation handled in GET)
+  - [x] Update POST endpoint to accept `discount` in request body, default to 0
+  - [x] Update GET / endpoint to include discount in response
+  - [x] Update GET /:id endpoint to calculate balance as (subtotal - discount) - total_paid
+- [x] Update `backend/routes/reports.js`:
+  - [x] Update `/outstanding` query to include discount and calculate balance as (subtotal - discount) - paid
 
-# TODO: Add Discount and Final Total to Orders
+## Frontend Changes
+- [x] Update `frontend/index.html`:
+  - [x] Add discount input field in order form
+  - [x] Add discount column to ordersTable
+  - [x] Add discount column to outstandingTable
+- [ ] Update `frontend/js/app.js`:
+  - [ ] Modify order form submission to include discount
+  - [ ] Update `loadOrders` to display discount column
+  - [ ] Update `loadOutstanding` to display discount column
+  - [ ] Update `viewOrder` modal to display discount
 
-- [x] Add discount and final_total columns to orders table in schema.sql
-- [x] Update recalcTotals function in backend/routes/orders.js to calculate final_total = subtotal - discount
-- [x] Update POST /orders to accept discount parameter
-- [x] Update PUT /orders to accept discount parameter
-- [x] Update frontend to include discount field in order form
-- [x] Update order display to show final total instead of subtotal for balance calculation
-- [x] Test discount functionality
-
-# TODO: Fix Issues Found During Review
-
-- [x] Fix seed.js to use parameterized queries instead of string interpolation for product names with parentheses
-- [x] Verify all backend routes are working correctly
-- [x] Verify frontend JavaScript has no syntax errors
-- [x] Verify HTML structure is correct
-- [x] Verify CSS styles are applied correctly
-- [x] Test basic CRUD operations for clients, products, and orders
-- [x] Test date filtering functionality
-- [x] Test discount calculation and final total display
-
-# TODO: Add Payment Method Column to Orders Table
-
-- [x] Add "Payment Method" column header to orders table in frontend/index.html
-- [x] Update loadOrders function in frontend/js/app.js to display payment_method in the table row
-- [x] Adjust tfoot colspan to account for new column
-- [x] Add logic to display balance as negative for Installment payment method
-- [x] Test the payment method display in the orders table
+## Testing
+- [ ] Test creating orders with discount
+- [ ] Verify balance calculations in order list, reports, and modal
+- [ ] Ensure backward compatibility (existing orders have discount 0)

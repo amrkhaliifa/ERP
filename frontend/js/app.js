@@ -1,195 +1,195 @@
 const API = "/api";
 
 async function json(url, opts = {}) {
-  const controller = new AbortController();
-  const timeout = opts.timeout || 10000;
-  const _opts = { signal: controller.signal, ...opts };
+    const controller = new AbortController();
+    const timeout = opts.timeout || 10000;
+    const _opts = { signal: controller.signal, ...opts };
 
-  // Only set Content-Type when sending a body
-  if (_opts.body) {
-    _opts.headers = {
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-    };
-  } else if (opts.headers) {
-    _opts.headers = opts.headers;
-  }
-
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const res = await fetch(url, _opts);
-    clearTimeout(timer);
-
-    // No content
-    if (res.status === 204) return null;
-
-    const text = await res.text();
-    if (!text) {
-      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
-      return null;
+    // Only set Content-Type when sending a body
+    if (_opts.body) {
+        _opts.headers = {
+            "Content-Type": "application/json",
+            ...(opts.headers || {}),
+        };
+    } else if (opts.headers) {
+        _opts.headers = opts.headers;
     }
 
-    let body;
+    const timer = setTimeout(() => controller.abort(), timeout);
     try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
+        const res = await fetch(url, _opts);
+        clearTimeout(timer);
 
-    if (!res.ok) {
-      const msg =
-        (body && body.error) ||
-        (typeof body === "string" && body) ||
-        res.statusText ||
-        `HTTP ${res.status}`;
-      const e = new Error(msg);
-      e.status = res.status;
-      throw e;
+        // No content
+        if (res.status === 204) return null;
+
+        const text = await res.text();
+        if (!text) {
+            if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+            return null;
+        }
+
+        let body;
+        try {
+            body = JSON.parse(text);
+        } catch {
+            body = text;
+        }
+
+        if (!res.ok) {
+            const msg =
+                (body && body.error) ||
+                (typeof body === "string" && body) ||
+                res.statusText ||
+                `HTTP ${res.status}`;
+            const e = new Error(msg);
+            e.status = res.status;
+            throw e;
+        }
+        return body;
+    } catch (err) {
+        clearTimeout(timer);
+        throw err;
     }
-    return body;
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
-  }
 }
 
 // --- add: centralized refresh helper ---
 async function refreshAll() {
-  // run independent loaders in parallel, but keep Clients -> order-client select in case it depends
-  // run clients first to ensure order client select can use them if needed
-  try {
-    await loadClients();
-  } catch (e) {
-    console.warn("loadClients failed", e);
-  }
+    // run independent loaders in parallel, but keep Clients -> order-client select in case it depends
+    // run clients first to ensure order client select can use them if needed
+    try {
+        await loadClients();
+    } catch (e) {
+        console.warn("loadClients failed", e);
+    }
 
-  await Promise.all([
-    (async () => {
-      try {
-        await loadClientsForOrder();
-      } catch (e) {
-        console.warn("loadClientsForOrder failed", e);
-      }
-    })(),
-    (async () => {
-      try {
-        await loadProducts();
-      } catch (e) {
-        console.warn("loadProducts failed", e);
-      }
-    })(),
-    (async () => {
-      try {
-        await loadProductsForOrder();
-      } catch (e) {
-        console.warn("loadProductsForOrder failed", e);
-      }
-    })(),
-    (async () => {
-      try {
-        await loadOrders();
-      } catch (e) {
-        console.warn("loadOrders failed", e);
-      }
-    })(),
-    (async () => {
-      try {
-        await loadOutstanding();
-      } catch (e) {
-        console.warn("loadOutstanding failed", e);
-      }
-    })(),
-  ]);
+    await Promise.all([
+        (async() => {
+            try {
+                await loadClientsForOrder();
+            } catch (e) {
+                console.warn("loadClientsForOrder failed", e);
+            }
+        })(),
+        (async() => {
+            try {
+                await loadProducts();
+            } catch (e) {
+                console.warn("loadProducts failed", e);
+            }
+        })(),
+        (async() => {
+            try {
+                await loadProductsForOrder();
+            } catch (e) {
+                console.warn("loadProductsForOrder failed", e);
+            }
+        })(),
+        (async() => {
+            try {
+                await loadOrders();
+            } catch (e) {
+                console.warn("loadOrders failed", e);
+            }
+        })(),
+        (async() => {
+            try {
+                await loadOutstanding();
+            } catch (e) {
+                console.warn("loadOutstanding failed", e);
+            }
+        })(),
+    ]);
 }
 
 // Tabs
 const tabs = document.querySelectorAll("#tabs .nav-link");
 tabs.forEach((btn) =>
-  btn.addEventListener("click", async () => {
-    tabs.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    document
-      .querySelectorAll(".tab-pane")
-      .forEach((p) => p.classList.remove("active"));
-    const target = document.querySelector(btn.dataset.target);
-    if (target) target.classList.add("active");
+    btn.addEventListener("click", async() => {
+        tabs.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        document
+            .querySelectorAll(".tab-pane")
+            .forEach((p) => p.classList.remove("active"));
+        const target = document.querySelector(btn.dataset.target);
+        if (target) target.classList.add("active");
 
-    // call loader for target pane
-    try {
-      const id = (btn.dataset.target || "").replace("#", "");
-      if (id === "clients") await loadClients();
-      else if (id === "inventory") await loadProducts();
-      else if (id === "orders") await loadOrders();
-      else if (id === "reports") {
-        await loadOutstanding();
-        // optionally keep profit data unchanged until user requests
-      }
-      // always refresh selects used across tabs
-      await loadClientsForOrder().catch(() => {});
-      await loadProductsForOrder().catch(() => {});
-    } catch (e) {
-      console.warn("pane load failed", e);
-    }
-  })
+        // call loader for target pane
+        try {
+            const id = (btn.dataset.target || "").replace("#", "");
+            if (id === "clients") await loadClients();
+            else if (id === "inventory") await loadProducts();
+            else if (id === "orders") await loadOrders();
+            else if (id === "reports") {
+                await loadOutstanding();
+                // optionally keep profit data unchanged until user requests
+            }
+            // always refresh selects used across tabs
+            await loadClientsForOrder().catch(() => {});
+            await loadProductsForOrder().catch(() => {});
+        } catch (e) {
+            console.warn("pane load failed", e);
+        }
+    })
 );
 
 // Add Clients
 const clientForm = document.getElementById("clientForm");
 if (clientForm) {
-  clientForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(clientForm);
-    await json(`${API}/clients`, {
-      method: "POST",
-      body: JSON.stringify(Object.fromEntries(fd)),
+    clientForm.addEventListener("submit", async(e) => {
+        e.preventDefault();
+        const fd = new FormData(clientForm);
+        await json(`${API}/clients`, {
+            method: "POST",
+            body: JSON.stringify(Object.fromEntries(fd)),
+        });
+        clientForm.reset();
+        await refreshAll();
     });
-    clientForm.reset();
-    await refreshAll();
-  });
 } else {
-  console.warn("clientForm not found in DOM.");
+    console.warn("clientForm not found in DOM.");
 }
 
 // Clients List
 async function loadClients() {
-  try {
-    const rows = await json(`${API}/clients`);
-    // fetch orders to compute purchases per client
-    let orders = [];
     try {
-      orders = await json(`${API}/orders`);
-    } catch {
-      orders = [];
-    }
+        const rows = await json(`${API}/clients`);
+        // fetch orders to compute purchases per client
+        let orders = [];
+        try {
+            orders = await json(`${API}/orders`);
+        } catch {
+            orders = [];
+        }
 
-    const counts = {};
-    (orders || []).forEach((o) => {
-      // resolve client id from possible shapes
-      let cid = null;
-      if (o.client && typeof o.client === "object") {
-        cid = o.client.id ?? o.clientId ?? o.client_id;
-      } else if (o.client) {
-        // could be numeric string or number
-        cid = o.clientId ?? o.client_id ?? o.client;
-      } else {
-        cid = o.clientId ?? o.client_id ?? o.client;
-      }
-      cid = parseInt(cid);
-      if (!Number.isNaN(cid)) counts[cid] = (counts[cid] || 0) + 1;
-    });
+        const counts = {};
+        (orders || []).forEach((o) => {
+            // resolve client id from possible shapes
+            let cid = null;
+            if (o.client && typeof o.client === "object") {
+                cid = o.client.id ?? o.clientId ?? o.client_id;
+            } else if (o.client) {
+                // could be numeric string or number
+                cid = o.clientId ?? o.client_id ?? o.client;
+            } else {
+                cid = o.clientId ?? o.client_id ?? o.client;
+            }
+            cid = parseInt(cid);
+            if (!Number.isNaN(cid)) counts[cid] = (counts[cid] || 0) + 1;
+        });
 
-    let table = document.getElementById("clientsTable");
-    if (!table) return;
-    let tbody = table.querySelector("tbody");
-    if (!tbody) {
-      tbody = document.createElement("tbody");
-      table.appendChild(tbody);
-    }
+        let table = document.getElementById("clientsTable");
+        if (!table) return;
+        let tbody = table.querySelector("tbody");
+        if (!tbody) {
+            tbody = document.createElement("tbody");
+            table.appendChild(tbody);
+        }
 
-    tbody.innerHTML = (rows || [])
-      .map((r) => {
-        const purchases = counts[r.id] || 0;
-        return `<tr>
+        tbody.innerHTML = (rows || [])
+            .map((r) => {
+                const purchases = counts[r.id] || 0;
+                return `<tr>
             <td>${r.id}</td>
             <td>${escapeHtml(r.name)}</td>
             <td>${r.phone || ""}</td>
@@ -210,94 +210,94 @@ async function loadClients() {
               </div>
             </td>
           </tr>`;
-      })
-      .join("");
-  } catch (err) {
-    console.error("Failed to load clients:", err);
-    alert(err.message || "Failed to load clients");
-  }
+            })
+            .join("");
+    } catch (err) {
+        console.error("Failed to load clients:", err);
+        alert(err.message || "Failed to load clients");
+    }
 }
 
 // Delete client
 async function deleteClient(id) {
-  if (!confirm("Are you sure you want to delete this client?")) return;
-  try {
-    await json(`${API}/clients/${id}`, { method: "DELETE" });
-  } catch (err) {
-    // show error to user
-    alert(err.message || "Failed to delete client");
-  } finally {
-    // always refresh lists so UI stays consistent
-    await refreshAll();
-  }
+    if (!confirm("Are you sure you want to delete this client?")) return;
+    try {
+        await json(`${API}/clients/${id}`, { method: "DELETE" });
+    } catch (err) {
+        // show error to user
+        alert(err.message || "Failed to delete client");
+    } finally {
+        // always refresh lists so UI stays consistent
+        await refreshAll();
+    }
 }
 
 // Edit client (modal)
 function attachEditModalHandlers(modal) {
-  if (!modal) return;
-  const form = modal.querySelector("#editClientForm");
-  // dismiss buttons (X / Cancel / backdrop)
-  modal.querySelectorAll("[data-dismiss='modal']").forEach((el) => {
-    // avoid double-registering
-    if (el.dataset.wiredDismiss) return;
-    el.addEventListener("click", () => {
-      modal.classList.remove("show");
-      modal.setAttribute("aria-hidden", "true");
-    });
-    el.dataset.wiredDismiss = "1";
-  });
-
-  // backdrop click should close
-  const backdrop = modal.querySelector(".modal-backdrop");
-  if (backdrop && !backdrop.dataset.wiredBackdrop) {
-    backdrop.addEventListener("click", () => {
-      modal.classList.remove("show");
-      modal.setAttribute("aria-hidden", "true");
-    });
-    backdrop.dataset.wiredBackdrop = "1";
-  }
-
-  // submit handler for the edit form
-  if (form && !form.dataset.wiredSubmit) {
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const fd = new FormData(form);
-      const id = fd.get("id");
-      if (!id) {
-        alert("Missing client id.");
-        return;
-      }
-      try {
-        await json(`${API}/clients/${id}`, {
-          method: "PUT",
-          body: JSON.stringify(Object.fromEntries(fd)),
-          headers: { "Content-Type": "application/json" },
+    if (!modal) return;
+    const form = modal.querySelector("#editClientForm");
+    // dismiss buttons (X / Cancel / backdrop)
+    modal.querySelectorAll("[data-dismiss='modal']").forEach((el) => {
+        // avoid double-registering
+        if (el.dataset.wiredDismiss) return;
+        el.addEventListener("click", () => {
+            modal.classList.remove("show");
+            modal.setAttribute("aria-hidden", "true");
         });
-        modal.classList.remove("show");
-        modal.setAttribute("aria-hidden", "true");
-        await refreshAll();
-      } catch (err) {
-        alert(err.message || "Failed to update client.");
-      }
+        el.dataset.wiredDismiss = "1";
     });
-    form.dataset.wiredSubmit = "1";
-  }
+
+    // backdrop click should close
+    const backdrop = modal.querySelector(".modal-backdrop");
+    if (backdrop && !backdrop.dataset.wiredBackdrop) {
+        backdrop.addEventListener("click", () => {
+            modal.classList.remove("show");
+            modal.setAttribute("aria-hidden", "true");
+        });
+        backdrop.dataset.wiredBackdrop = "1";
+    }
+
+    // submit handler for the edit form
+    if (form && !form.dataset.wiredSubmit) {
+        form.addEventListener("submit", async(e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            const id = fd.get("id");
+            if (!id) {
+                alert("Missing client id.");
+                return;
+            }
+            try {
+                await json(`${API}/clients/${id}`, {
+                    method: "PUT",
+                    body: JSON.stringify(Object.fromEntries(fd)),
+                    headers: { "Content-Type": "application/json" },
+                });
+                modal.classList.remove("show");
+                modal.setAttribute("aria-hidden", "true");
+                await refreshAll();
+            } catch (err) {
+                alert(err.message || "Failed to update client.");
+            }
+        });
+        form.dataset.wiredSubmit = "1";
+    }
 }
 // Show edit client modal
 async function editClient(id) {
-  try {
-    const clientToEdit = await json(`${API}/clients/${id}`);
+    try {
+        const clientToEdit = await json(`${API}/clients/${id}`);
 
-    // find existing modal/form (page may include them)
-    let modal = document.getElementById("editClientModal");
-    let form = document.getElementById("editClientForm");
+        // find existing modal/form (page may include them)
+        let modal = document.getElementById("editClientModal");
+        let form = document.getElementById("editClientForm");
 
-    // if no modal in DOM, create it (keeps markup out of HTML if you prefer)
-    if (!modal) {
-      modal = document.createElement("div");
-      modal.id = "editClientModal";
-      modal.className = "modal";
-      modal.innerHTML = `
+        // if no modal in DOM, create it (keeps markup out of HTML if you prefer)
+        if (!modal) {
+            modal = document.createElement("div");
+            modal.id = "editClientModal";
+            modal.className = "modal";
+            modal.innerHTML = `
         <div class="modal-backdrop" data-dismiss="modal"></div>
         <div class="modal-content" role="dialog" aria-modal="true">
           <header class="modal-header">
@@ -325,91 +325,91 @@ async function editClient(id) {
           </form>
         </div>
       `;
-      document.body.appendChild(modal);
-      form = document.getElementById("editClientForm");
+            document.body.appendChild(modal);
+            form = document.getElementById("editClientForm");
+        }
+
+        // ensure handlers are attached (works for modal provided in HTML or created above)
+        attachEditModalHandlers(modal);
+
+        // populate inputs
+        const idInput = document.getElementById("editClientId");
+        const nameInput = document.getElementById("editClientName");
+        const phoneInput = document.getElementById("editClientPhone");
+        const addrInput = document.getElementById("editClientAddress");
+
+        if (!idInput || !nameInput || !phoneInput || !addrInput) {
+            alert("Failed to initialize edit form inputs.");
+            return;
+        }
+
+        idInput.value = clientToEdit.id ?? "";
+        nameInput.value = clientToEdit.name ?? "";
+        phoneInput.value = clientToEdit.phone ?? "";
+        addrInput.value = clientToEdit.address ?? "";
+
+        // show modal
+        modal.classList.add("show");
+        modal.setAttribute("aria-hidden", "false");
+    } catch (err) {
+        alert(err.message || "Failed to load client for editing.");
     }
-
-    // ensure handlers are attached (works for modal provided in HTML or created above)
-    attachEditModalHandlers(modal);
-
-    // populate inputs
-    const idInput = document.getElementById("editClientId");
-    const nameInput = document.getElementById("editClientName");
-    const phoneInput = document.getElementById("editClientPhone");
-    const addrInput = document.getElementById("editClientAddress");
-
-    if (!idInput || !nameInput || !phoneInput || !addrInput) {
-      alert("Failed to initialize edit form inputs.");
-      return;
-    }
-
-    idInput.value = clientToEdit.id ?? "";
-    nameInput.value = clientToEdit.name ?? "";
-    phoneInput.value = clientToEdit.phone ?? "";
-    addrInput.value = clientToEdit.address ?? "";
-
-    // show modal
-    modal.classList.add("show");
-    modal.setAttribute("aria-hidden", "false");
-  } catch (err) {
-    alert(err.message || "Failed to load client for editing.");
-  }
 }
 
 // Load clients into order form select
 async function loadClientsForOrder() {
-  const rows = await json(`${API}/clients`);
-  const sel = document.getElementById("orderClient");
-  if (!sel) return;
-  // keep the placeholder option, then append real options
-  const placeholder = `<option value="" selected disabled>Select client</option>`;
-  sel.innerHTML =
-    placeholder +
-    (rows || [])
-      .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
-      .join("");
+    const rows = await json(`${API}/clients`);
+    const sel = document.getElementById("orderClient");
+    if (!sel) return;
+    // keep the placeholder option, then append real options
+    const placeholder = `<option value="" selected disabled>Select client</option>`;
+    sel.innerHTML =
+        placeholder +
+        (rows || [])
+        .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
+        .join("");
 }
 
 async function loadProductsForOrder() {
-  const rows = await json(`${API}/products`);
-  const sel = document.getElementById("orderProduct");
-  if (!sel) return;
-  const placeholder = `<option value="" selected disabled>Select product</option>`;
-  sel.innerHTML =
-    placeholder +
-    (rows || [])
-      .map(
-        (p) =>
-          `<option value="${p.id}" data-name="${escapeHtml(
+    const rows = await json(`${API}/products`);
+    const sel = document.getElementById("orderProduct");
+    if (!sel) return;
+    const placeholder = `<option value="" selected disabled>Select product</option>`;
+    sel.innerHTML =
+        placeholder +
+        (rows || [])
+        .map(
+            (p) =>
+            `<option value="${p.id}" data-name="${escapeHtml(
             p.name
           )}" data-unit="${escapeHtml(p.unit || "")}" data-cost-price="${
             p.cost_price || 0
           }" data-price="${p.default_sale_price || 0}">${escapeHtml(
             p.name
           )}</option>`
-      )
-      .join("");
+        )
+        .join("");
 }
 
 // Products
 
 async function loadProducts() {
-  const rows = await json(`${API}/products`);
-  let table = document.getElementById("productsTable");
-  if (!table) return;
-  let tbody = table.querySelector("tbody");
-  if (!tbody) {
-    tbody = document.createElement("tbody");
-    table.appendChild(tbody);
-  }
-  const lowStockThreshold = 100;
-  tbody.innerHTML = (rows || [])
-    .map((p) => {
-      const stockQty = Number(p.stock_qty ?? 0);
-      const stockClass =
-        stockQty <= lowStockThreshold ? "low-stock" : "normal-stock";
+    const rows = await json(`${API}/products`);
+    let table = document.getElementById("productsTable");
+    if (!table) return;
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+        tbody = document.createElement("tbody");
+        table.appendChild(tbody);
+    }
+    const lowStockThreshold = 100;
+    tbody.innerHTML = (rows || [])
+        .map((p) => {
+            const stockQty = Number(p.stock_qty ?? 0);
+            const stockClass =
+                stockQty <= lowStockThreshold ? "low-stock" : "normal-stock";
 
-      return `<tr>
+            return `<tr>
         <td>${p.id}</td>
         <td>${escapeHtml(p.name)}</td>
         <td>${escapeHtml(p.color || "")}</td>
@@ -432,100 +432,100 @@ async function loadProducts() {
           </div>
         </td>
       </tr>`;
-    })
-    .join("");
+        })
+        .join("");
 }
 
 // editProduct: populate productForm for editing
 async function editProduct(id) {
-  try {
-    const p = await json(`${API}/products/${id}`);
-    const form = document.getElementById("productForm");
-    if (!form) return alert("Product form not found.");
-    // ensure hidden id field exists
-    let idInput = form.querySelector("#editProductId");
-    if (!idInput) {
-      idInput = document.createElement("input");
-      idInput.type = "hidden";
-      idInput.id = "editProductId";
-      idInput.name = "id";
-      form.prepend(idInput);
+    try {
+        const p = await json(`${API}/products/${id}`);
+        const form = document.getElementById("productForm");
+        if (!form) return alert("Product form not found.");
+        // ensure hidden id field exists
+        let idInput = form.querySelector("#editProductId");
+        if (!idInput) {
+            idInput = document.createElement("input");
+            idInput.type = "hidden";
+            idInput.id = "editProductId";
+            idInput.name = "id";
+            form.prepend(idInput);
+        }
+        idInput.value = p.id ?? "";
+
+        // populate known fields (by name)
+        const set = (name, value) => {
+            const el = form.querySelector(`[name="${name}"]`);
+            if (el) el.value = value ?? "";
+        };
+        set("name", p.name);
+        set("color", p.color || "");
+        set("unit", p.unit || "");
+        set("cost_price", p.cost_price ?? "");
+        set("default_sale_price", p.default_sale_price ?? "");
+        set("stock_qty", p.stock_qty ?? "");
+
+        // focus name for convenience
+        const nameEl = form.querySelector('[name="name"]');
+        if (nameEl) nameEl.focus();
+    } catch (err) {
+        alert(err.message || "Failed to load product for editing.");
     }
-    idInput.value = p.id ?? "";
-
-    // populate known fields (by name)
-    const set = (name, value) => {
-      const el = form.querySelector(`[name="${name}"]`);
-      if (el) el.value = value ?? "";
-    };
-    set("name", p.name);
-    set("color", p.color || "");
-    set("unit", p.unit || "");
-    set("cost_price", p.cost_price ?? "");
-    set("default_sale_price", p.default_sale_price ?? "");
-    set("stock_qty", p.stock_qty ?? "");
-
-    // focus name for convenience
-    const nameEl = form.querySelector('[name="name"]');
-    if (nameEl) nameEl.focus();
-  } catch (err) {
-    alert(err.message || "Failed to load product for editing.");
-  }
 }
 
 // deleteProduct: call API then refresh
 async function deleteProduct(id) {
-  if (!confirm("Are you sure you want to delete this product?")) return;
-  try {
-    await json(`${API}/products/${id}`, { method: "DELETE" });
-    await refreshAll();
-  } catch (err) {
-    alert(err.message || "Failed to delete product.");
-  }
+    if (!confirm("Are you sure you want to delete this product?")) return;
+    try {
+        await json(`${API}/products/${id}`, { method: "DELETE" });
+        await refreshAll();
+    } catch (err) {
+        alert(err.message || "Failed to delete product.");
+    }
 }
 
 // update productForm submit to support create (POST) and update (PUT)
 const productForm = document.getElementById("productForm");
 if (productForm) {
-  // remove previously attached listener if any (best-effort)
-  try {
-    productForm.removeEventListener("submit", () => {});
-  } catch {}
-  productForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(productForm);
-    const data = Object.fromEntries(fd);
-    ["cost_price", "default_sale_price", "stock_qty"].forEach(
-      (k) => (data[k] = parseFloat(data[k] || 0))
-    );
-
-    // detect edit mode by hidden id field
-    const idInput = productForm.querySelector("#editProductId");
+    // remove previously attached listener if any (best-effort)
     try {
-      if (idInput && idInput.value) {
-        // update
-        const id = idInput.value;
-        await json(`${API}/products/${id}`, {
-          method: "PUT",
-          body: JSON.stringify(data),
-          headers: { "Content-Type": "application/json" },
-        });
-        // remove edit marker
-        idInput.remove();
-      } else {
-        // create
-        await json(`${API}/products`, {
-          method: "POST",
-          body: JSON.stringify(data),
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      productForm.reset();
-      await refreshAll();
-    } catch (err) {
-      alert(err.message || "Failed to save product.");
-    }
-  });
+        productForm.removeEventListener("submit", () => {});
+    } catch {}
+    productForm.addEventListener("submit", async(e) => {
+        e.preventDefault();
+        const fd = new FormData(productForm);
+        const data = Object.fromEntries(fd);
+        ["cost_price", "default_sale_price", "stock_qty"].forEach(
+            (k) => (data[k] = parseFloat(data[k] || 0))
+        );
+
+        // detect edit mode by hidden id field
+        const idInput = productForm.querySelector("#editProductId");
+        try {
+            if (idInput && idInput.value) {
+                // update
+                const id = idInput.value;
+                await json(`${API}/products/${id}`, {
+                    method: "PUT",
+                    body: JSON.stringify(data),
+                    headers: { "Content-Type": "application/json" },
+                });
+                // remove edit marker
+                idInput.remove();
+            } else {
+                // create
+                await json(`${API}/products`, {
+                    method: "POST",
+                    body: JSON.stringify(data),
+                    headers: { "Content-Type": "application/json" },
+                });
+            }
+            productForm.reset();
+            await refreshAll();
+        } catch (err) {
+            alert(err.message || "Failed to save product.");
+        }
+    });
 }
 
 // Orders
@@ -533,11 +533,11 @@ let orderItems = [];
 let currentOrderDateFilter = null;
 
 function renderOrderItems() {
-  const tbody = document.querySelector("#orderItemsTable tbody");
-  tbody.innerHTML = orderItems
-    .map(
-      (it, idx) =>
-        `<tr data-idx="${idx}">
+    const tbody = document.querySelector("#orderItemsTable tbody");
+    tbody.innerHTML = orderItems
+        .map(
+            (it, idx) =>
+            `<tr data-idx="${idx}">
           <td>${escapeHtml(it.name || "")}</td>
           <td>${it.qty}</td>
           <td>${escapeHtml(it.unit || "")}</td>
@@ -545,184 +545,195 @@ function renderOrderItems() {
           <td>${formatCurrency(it.price || 0)}</td>
           <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-item" data-idx="${idx}">Remove</button></td>
         </tr>`
-    )
-    .join("");
+        )
+        .join("");
 
-  // Update total
-  const total = orderItems.reduce((sum, i) => sum + i.qty * (i.price || 0), 0);
-  const totalCell = document.getElementById("orderTotal");
-  if (totalCell) totalCell.textContent = formatCurrency(total);
+    // Update total
+    const total = orderItems.reduce((sum, i) => sum + i.qty * (i.price || 0), 0);
+    const totalCell = document.getElementById("orderTotal");
+    if (totalCell) totalCell.textContent = formatCurrency(total);
 
-  // keep hidden input in sync
-  const itemsInput = document.getElementById("items");
-  if (itemsInput)
-    itemsInput.value = JSON.stringify(
-      orderItems.map((i) => ({ productId: i.productId, qty: i.qty }))
-    );
+    // keep hidden input in sync
+    const itemsInput = document.getElementById("items");
+    if (itemsInput)
+        itemsInput.value = JSON.stringify(
+            orderItems.map((i) => ({ productId: i.productId, qty: i.qty }))
+        );
 }
 
 function escapeHtml(s = "") {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
-        c
-      ])
-  );
+    return String(s).replace(
+        /[&<>"']/g,
+        (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
+            c
+        ])
+    );
 }
 
 // add item button handler
 const addItemBtn = document.getElementById("addItemBtn");
 if (addItemBtn) {
-  addItemBtn.addEventListener("click", () => {
-    const prodSel = document.getElementById("orderProduct");
-    const qtyEl = document.getElementById("orderQty");
-    if (!prodSel || !qtyEl)
-      return alert("Product selector or quantity missing.");
-    const productId = parseInt(prodSel.value);
-    if (!productId) return alert("Select a product.");
-    const name =
-      prodSel.options[prodSel.selectedIndex]?.dataset?.name ||
-      prodSel.options[prodSel.selectedIndex]?.text;
-    const qty = Math.max(1, parseFloat(qtyEl.value || 1));
-    const unit = prodSel.options[prodSel.selectedIndex]?.dataset?.unit || "";
-    const cost_price = parseFloat(
-      prodSel.selectedOptions[0].dataset.costPrice || 0
-    );
-    const price = parseFloat(prodSel.selectedOptions[0].dataset.price || 0);
-    const existing = orderItems.find((i) => i.productId === productId);
-    if (existing) {
-      existing.qty += qty;
-    } else {
-      orderItems.push({ productId, name, qty, unit, cost_price, price });
-    }
-    renderOrderItems();
-  });
+    addItemBtn.addEventListener("click", () => {
+        const prodSel = document.getElementById("orderProduct");
+        const qtyEl = document.getElementById("orderQty");
+        if (!prodSel || !qtyEl)
+            return alert("Product selector or quantity missing.");
+        const productId = parseInt(prodSel.value);
+        if (!productId) return alert("Select a product.");
+        const name =
+            prodSel.options[prodSel.selectedIndex] ?.dataset ?.name ||
+            prodSel.options[prodSel.selectedIndex] ?.text;
+        const qty = Math.max(1, parseFloat(qtyEl.value || 1));
+        const unit = prodSel.options[prodSel.selectedIndex] ?.dataset ?.unit || "";
+        const cost_price = parseFloat(
+            prodSel.selectedOptions[0].dataset.costPrice || 0
+        );
+        const price = parseFloat(prodSel.selectedOptions[0].dataset.price || 0);
+        const existing = orderItems.find((i) => i.productId === productId);
+        if (existing) {
+            existing.qty += qty;
+        } else {
+            orderItems.push({ productId, name, qty, unit, cost_price, price });
+        }
+        renderOrderItems();
+    });
 }
 
 // remove item via delegation
 const orderItemsTable = document.getElementById("orderItemsTable");
 if (orderItemsTable) {
-  orderItemsTable.addEventListener("click", (ev) => {
-    if (!ev.target.matches(".remove-item")) return;
-    const idx = Number(ev.target.dataset.idx);
-    if (Number.isFinite(idx)) {
-      orderItems.splice(idx, 1);
-      renderOrderItems();
-    }
-  });
+    orderItemsTable.addEventListener("click", (ev) => {
+        if (!ev.target.matches(".remove-item")) return;
+        const idx = Number(ev.target.dataset.idx);
+        if (Number.isFinite(idx)) {
+            orderItems.splice(idx, 1);
+            renderOrderItems();
+        }
+    });
 }
 
 // Adjust order submit to prefer in-memory orderItems if present
 // replace earlier orderForm submit handler (the one that parses items)
 const orderForm = document.getElementById("orderForm");
 if (!orderForm) {
-  console.warn("orderForm not found in DOM.");
+    console.warn("orderForm not found in DOM.");
 } else {
-  // remove any previous listeners if needed, then attach new
-  orderForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      const fd = new FormData(orderForm);
-
-      // clientId
-      let clientId = fd.get("clientId");
-      if (!clientId) {
-        const sel = document.getElementById("orderClient");
-        clientId = sel ? sel.value : null;
-      }
-      clientId = parseInt(clientId);
-      if (!clientId || Number.isNaN(clientId)) {
-        alert("Please select a client for the order.");
-        return;
-      }
-
-      // deposit
-      let deposit = fd.get("deposit");
-      if (deposit == null) {
-        const depEl = document.getElementById("deposit");
-        deposit = depEl ? depEl.value : "0";
-      }
-      deposit = parseFloat(deposit || 0);
-
-      // items: prefer in-memory orderItems, fallback to hidden input / FormData
-      let items = [];
-      if (orderItems && orderItems.length) {
-        items = orderItems.map((it) => ({
-          productId: it.productId,
-          qty: it.qty,
-        }));
-      } else {
-        const itemsRaw =
-          fd.get("items") || document.getElementById("items")?.value || "[]";
+    // remove any previous listeners if needed, then attach new
+    orderForm.addEventListener("submit", async(e) => {
+        e.preventDefault();
         try {
-          items = JSON.parse(itemsRaw);
-        } catch {
-          items = [];
+            const fd = new FormData(orderForm);
+
+            // clientId
+            let clientId = fd.get("clientId");
+            if (!clientId) {
+                const sel = document.getElementById("orderClient");
+                clientId = sel ? sel.value : null;
+            }
+            clientId = parseInt(clientId);
+            if (!clientId || Number.isNaN(clientId)) {
+                alert("Please select a client for the order.");
+                return;
+            }
+
+            // deposit
+            let deposit = fd.get("deposit");
+            if (deposit == null) {
+                const depEl = document.getElementById("deposit");
+                deposit = depEl ? depEl.value : "0";
+            }
+            deposit = parseFloat(deposit || 0);
+
+            // items: prefer in-memory orderItems, fallback to hidden input / FormData
+            let items = [];
+            if (orderItems && orderItems.length) {
+                items = orderItems.map((it) => ({
+                    productId: it.productId,
+                    qty: it.qty,
+                }));
+            } else {
+                const itemsRaw =
+                    fd.get("items") || document.getElementById("items") ?.value || "[]";
+                try {
+                    items = JSON.parse(itemsRaw);
+                } catch {
+                    items = [];
+                }
+            }
+
+            if (!Array.isArray(items) || items.length === 0) {
+                alert("No items in the order. Add at least one product.");
+                return;
+            }
+
+            // normalize
+            items = items
+                .map((it) => ({
+                    productId: parseInt(it.productId),
+                    qty: parseFloat(it.qty || 0),
+                }))
+                .filter((it) => it.productId && it.qty > 0);
+
+            if (items.length === 0) {
+                alert("No valid items found for the order.");
+                return;
+            }
+
+            // paymentMethod
+            let paymentMethod = fd.get("paymentMethod");
+            if (!paymentMethod) {
+                const pmEl = document.getElementById("paymentMethod");
+                paymentMethod = pmEl ? pmEl.value : "Cash";
+            }
+
+            // discount
+            let discount = fd.get("discount");
+            if (discount == null) {
+                const discEl = document.getElementById("discount");
+                discount = discEl ? discEl.value : "0";
+            }
+            discount = parseFloat(discount || 0);
+
+            await json(`${API}/orders`, {
+                method: "POST",
+                body: JSON.stringify({ clientId, deposit, items, paymentMethod, discount }),
+                headers: { "Content-Type": "application/json" },
+            });
+
+            // clear UI and internal items
+            orderForm.reset();
+            orderItems = [];
+            renderOrderItems();
+            await refreshAll();
+        } catch (err) {
+            alert(err.message || "Failed to create order.");
         }
-      }
-
-      if (!Array.isArray(items) || items.length === 0) {
-        alert("No items in the order. Add at least one product.");
-        return;
-      }
-
-      // normalize
-      items = items
-        .map((it) => ({
-          productId: parseInt(it.productId),
-          qty: parseFloat(it.qty || 0),
-        }))
-        .filter((it) => it.productId && it.qty > 0);
-
-      if (items.length === 0) {
-        alert("No valid items found for the order.");
-        return;
-      }
-
-      // paymentMethod
-      let paymentMethod = fd.get("paymentMethod");
-      if (!paymentMethod) {
-        const pmEl = document.getElementById("paymentMethod");
-        paymentMethod = pmEl ? pmEl.value : "Cash";
-      }
-
-      await json(`${API}/orders`, {
-        method: "POST",
-        body: JSON.stringify({ clientId, deposit, items, paymentMethod }),
-        headers: { "Content-Type": "application/json" },
-      });
-
-      // clear UI and internal items
-      orderForm.reset();
-      orderItems = [];
-      renderOrderItems();
-      await refreshAll();
-    } catch (err) {
-      alert(err.message || "Failed to create order.");
-    }
-  });
+    });
 }
 
 // helper formatters
 function formatCurrency(v) {
-  if (v == null || Number.isNaN(Number(v))) return "0.00";
-  return Number(v).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+    if (v == null || Number.isNaN(Number(v))) return "0.00";
+    return Number(v).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
 }
+
 function formatDate(d) {
-  if (!d) return "";
-  const dt = new Date(d);
-  if (isNaN(dt)) return String(d);
-  return dt.toLocaleString();
+    if (!d) return "";
+    const dt = new Date(d);
+    if (isNaN(dt)) return String(d);
+    return dt.toLocaleString();
 }
 
 // Orders list loader
 async function loadOrders(dateFilter = currentOrderDateFilter) {
-  try {
-    const rows = await json(`${API}/orders${dateFilter ? `?date=${dateFilter}` : ""}`);
+    try {
+        const rows = await json(
+                `${API}/orders${dateFilter ? `?date=${dateFilter}` : ""}`
+    );
     const table = document.getElementById("ordersTable");
     if (!table) return;
     let tbody = table.querySelector("tbody");
@@ -732,20 +743,24 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
     }
 
     let totalSubtotal = 0;
+    let totalDiscount = 0;
     let totalPaid = 0;
     let totalBalance = 0;
 
     tbody.innerHTML = (rows || [])
       .map((r) => {
         const id = r.id ?? r.orderId ?? "";
-        const clientName = r.clientName ?? r.client_name ?? r.client ?? "Unknown";
+        const clientName =
+          r.clientName ?? r.client_name ?? r.client ?? "Unknown";
         const subtotal = Number(r.subtotal ?? r.total ?? 0);
+        const discount = Number(r.discount ?? 0);
         const paid = Number(r.total_paid ?? r.paid ?? 0);
-        const balance = paid - subtotal; // Calculate balance as negative if unpaid
+        const balance = paid - (subtotal - discount); // Calculate balance as negative if unpaid
         const date = r.created_at ?? r.date ?? "Unknown";
 
         // Accumulate totals
         totalSubtotal += subtotal;
+        totalDiscount += discount;
         totalPaid += paid;
         totalBalance += balance;
 
@@ -756,8 +771,10 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
           <td>${id}</td>
           <td>${escapeHtml(clientName)}</td>
           <td>${formatCurrency(subtotal)}</td>
+          <td>${formatCurrency(discount)}</td>
           <td>${formatCurrency(paid)}</td>
           <td class="${balanceClass}">${formatCurrency(balance)}</td>
+          <td>${escapeHtml(r.payment_method || "Cash")}</td>
           <td>${formatDate(date)}</td>
           <td>
             <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
@@ -767,9 +784,14 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
       .join("");
 
     // Update tfoot totals
-    document.getElementById("totalSubtotal").textContent = formatCurrency(totalSubtotal);
-    document.getElementById("totalPaid").textContent = formatCurrency(totalPaid);
-    document.getElementById("totalBalance").textContent = formatCurrency(totalBalance);
+    document.getElementById("totalSubtotal").textContent =
+      formatCurrency(totalSubtotal);
+    document.getElementById("totalDiscount").textContent =
+      formatCurrency(totalDiscount);
+    document.getElementById("totalPaid").textContent =
+      formatCurrency(totalPaid);
+    document.getElementById("totalBalance").textContent =
+      formatCurrency(totalBalance);
   } catch (err) {
     console.error("Failed to load orders:", err);
     alert(err.message || "Failed to load orders");
@@ -809,13 +831,12 @@ async function loadOutstanding() {
     };
 
     tbody.innerHTML = (rows || [])
-      .map(
-        (r) => {
-          const subtotal = Number(r.subtotal ?? 0);
-          const paid = calcPaid(r);
-          const balance = Number(r.balance ?? paid - subtotal);
-          const balanceClass = balance < 0 ? "text-danger" : "";
-          return `<tr>
+      .map((r) => {
+        const subtotal = Number(r.subtotal ?? 0);
+        const paid = calcPaid(r);
+        const balance = Number(r.balance ?? paid - subtotal);
+        const balanceClass = balance < 0 ? "text-danger" : "";
+        return `<tr>
             <td>${r.id ?? ""}</td>
             <td>${escapeHtml(r.client ?? r.clientName ?? "")}</td>
             <td>${subtotal.toFixed(2)}</td>
@@ -823,8 +844,7 @@ async function loadOutstanding() {
             <td class="${balanceClass}">${balance.toFixed(2)}</td>
             <td>${escapeHtml(r.created_at ?? r.date ?? "")}</td>
           </tr>`;
-        }
-      )
+      })
       .join("");
   } catch (err) {
     console.error("Failed to load outstanding:", err);
@@ -1043,7 +1063,9 @@ async function viewOrder(orderId) {
         return 0;
       };
       const paid = calcPaid(order);
-      const balance = Number(order.balance ?? subtotal - paid);
+      const discount = Number(order.discount || 0);
+      const orderTotal = subtotal - discount;
+      const balance = paid - orderTotal;
       const date = order.created_at ?? order.date ?? order.createdAt ?? "";
 
       content.innerHTML = `
@@ -1056,16 +1078,27 @@ async function viewOrder(orderId) {
           </div>
         </div>
         <div class="row mb-3">
-          <div class="col-md-4">
+          <div class="col-md-3">
             <strong>Subtotal:</strong> ${formatCurrency(subtotal)}
           </div>
-          <div class="col-md-4">
+          <div class="col-md-3">
+            <strong>Discount:</strong> ${formatCurrency(discount)}
+          </div>
+          <div class="col-md-3">
             <strong>Paid:</strong> ${formatCurrency(paid)}
           </div>
-          <div class="col-md-4">
+          <div class="col-md-3">
             <strong>Balance:</strong> <span class="${
               balance < 0 ? "text-danger" : ""
             }">${formatCurrency(balance)}</span>
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <strong>Payment Method:</strong> ${escapeHtml(order.payment_method || "Cash")}
+          </div>
+          <div class="col-md-6">
+            <strong>Order Total:</strong> ${formatCurrency(orderTotal)}
           </div>
         </div>
         <h5>Order Items</h5>
@@ -1128,7 +1161,7 @@ async function viewOrder(orderId) {
                   <td>${formatCurrency(
                     payment.amount ?? payment.paid ?? 0
                   )}</td>
-                  <td>${escapeHtml(payment.note ?? payment.method ?? "")}</td>
+                  <td>${escapeHtml(payment.note ?? order.payment_method ?? "Cash")}</td>
                 </tr>
               `
                 )

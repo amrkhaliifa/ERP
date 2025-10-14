@@ -37,34 +37,34 @@
                     <tbody></tbody>
                 </table>
             </div>
-<div id="editClientModal" class="modal" aria-hidden="true">
-    <div class="modal-backdrop" data-dismiss="modal"></div>
-    <div class="modal-content" role="dialog" aria-modal="true">
-        <header class="modal-header">
-            <h3>Edit Client</h3>
-            <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
-        </header>
-        <form id="editClientForm" class="modal-body">
-            <input type="hidden" id="editClientId" name="id">
-            <div class="form-row">
-                <label for="editClientName">Name</label>
-                <input type="text" id="editClientName" name="name" required>
+            <div id="editClientModal" class="modal" aria-hidden="true">
+                <div class="modal-backdrop" data-dismiss="modal"></div>
+                <div class="modal-content" role="dialog" aria-modal="true">
+                    <header class="modal-header">
+                        <h3>Edit Client</h3>
+                        <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+                    </header>
+                    <form id="editClientForm" class="modal-body">
+                        <input type="hidden" id="editClientId" name="id">
+                        <div class="form-row">
+                            <label for="editClientName">Name</label>
+                            <input type="text" id="editClientName" name="name" required>
+                        </div>
+                        <div class="form-row">
+                            <label for="editClientPhone">Phone</label>
+                            <input type="text" id="editClientPhone" name="phone">
+                        </div>
+                        <div class="form-row">
+                            <label for="editClientAddress">Address</label>
+                            <input type="text" id="editClientAddress" name="address">
+                        </div>
+                        <footer class="modal-footer">
+                            <button type="submit" class="btn btn-primary">Save</button>
+                            <button type="button" class="btn btn-warning" data-dismiss="modal">Cancel</button>
+                        </footer>
+                    </form>
+                </div>
             </div>
-            <div class="form-row">
-                <label for="editClientPhone">Phone</label>
-                <input type="text" id="editClientPhone" name="phone">
-            </div>
-            <div class="form-row">
-                <label for="editClientAddress">Address</label>
-                <input type="text" id="editClientAddress" name="address">
-            </div>
-            <footer class="modal-footer">
-                <button type="submit" class="btn btn-primary">Save</button>
-                <button type="button" class="btn btn-warning" data-dismiss="modal">Cancel</button>
-            </footer>
-        </form>
-    </div>
-</div>
 
             <div id="inventory" class="tab-pane">
                 <h5>Add/Update Product</h5>
@@ -76,7 +76,7 @@
                         <option value="Piece">Piece</option>
                         <option value="Kg">Kg</option>
                         </select></div>
-                      
+
                     <div class="col-md-2"><input class="form-control" name="cost_price" type="number" step="1" placeholder="Cost" />
                     </div>
                     <div class="col-md-2"><input class="form-control" name="default_sale_price" type="number" step="1" placeholder="Sale" /></div>
@@ -152,6 +152,10 @@
                         <label for="deposit" class="form-label" id="depositLabel">Deposit</label>
                         <input type="number" step="1" id="deposit" name="deposit" class="form-control" value="0">
                     </div>
+                    <div class="col-md-3">
+                        <label for="discount" class="form-label">Discount</label>
+                        <input type="number" step="1" id="discount" name="discount" class="form-control" value="0" min="0">
+                    </div>
 
                     <!-- hidden JSON backup of items -->
                     <input type="hidden" id="items" name="items" value="[]">
@@ -181,8 +185,10 @@
                             <th>ID</th>
                             <th>Client</th>
                             <th>Subtotal</th>
+                            <th>Discount</th>
                             <th>Paid</th>
                             <th>Balance</th>
+                            <th>Payment Method</th>
                             <th>Date</th>
                             <th>Actions</th>
                         </tr>
@@ -192,8 +198,10 @@
                         <tr>
                             <td colspan="2" class="text-end fw-bold">Total</td>
                             <td id="totalSubtotal" class="fw-bold"></td>
+                            <td id="totalDiscount" class="fw-bold"></td>
                             <td id="totalPaid" class="fw-bold"></td>
                             <td id="totalBalance" class="fw-bold text-danger"></td>
+                            <td></td>
                             <td colspan="2"></td>
                         </tr>
                     </tfoot>

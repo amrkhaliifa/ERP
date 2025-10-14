@@ -21,14 +21,18 @@ function recalcTotals(orderId) {
 }
 
 ro.get("/", (req, res) => {
-  const { date } = req.query;
+  const { date, limit = 50, offset = 0 } = req.query;
   let query = `SELECT o.*, c.name as client_name FROM orders o JOIN clients c ON c.id = o.client_id`;
   const params = [];
   if (date) {
     query += ` WHERE DATE(o.created_at) = ?`;
     params.push(date);
+  } else {
+    // Default to last 30 days if no date filter
+    query += ` WHERE o.created_at >= date('now', '-30 days')`;
   }
-  query += ` ORDER BY o.id DESC`;
+  query += ` ORDER BY o.id DESC LIMIT ? OFFSET ?`;
+  params.push(Number(limit), Number(offset));
   const rows = db3.prepare(query).all(...params);
 
   // Add items to each order for the list view
@@ -61,11 +65,11 @@ ro.get("/:id", (req, res) => {
       "SELECT * FROM payments WHERE order_id = ? ORDER BY paid_at ASC, id ASC"
     )
     .all(o.id);
-  res.json({ ...o, items, payments, balance: o.subtotal - o.total_paid });
+  res.json({ ...o, items, payments, balance: (o.subtotal - o.discount) - o.total_paid });
 });
 
 ro.post("/", (req, res) => {
-  const { clientId, items = [], deposit = 0, paymentMethod } = req.body;
+  const { clientId, items = [], deposit = 0, paymentMethod, discount = 0 } = req.body;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items required" });
@@ -78,11 +82,12 @@ ro.post("/", (req, res) => {
 
   const trx = db3.transaction(() => {
     const insOrder = db3.prepare(
-      "INSERT INTO orders(client_id, deposit_paid, total_paid, payment_method) VALUES (?, ?, 0, ?)"
+      "INSERT INTO orders(client_id, deposit_paid, total_paid, discount, payment_method) VALUES (?, ?, 0, ?, ?)"
     );
     const orderId = insOrder.run(
       clientId,
       Number(deposit || 0),
+      Number(discount || 0),
       paymentMethod
     ).lastInsertRowid;
 
