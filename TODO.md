@@ -1,8 +1,14 @@
-t# TODO: Make Order Tab Client and Product Selectors Allow Typing for Fast Selection
+# TODO: Add Edit Order Functionality in View Modal
 
-## Plan Steps
-- [x] Update frontend/index.html: Replace selects with input fields and add datalists for client and product.
-- [x] Update frontend/js/app.js: Add global arrays for clients and products, modify load functions to populate datalists, update addItemBtn and orderForm submit handlers to use inputs and arrays.
-- [x] Test typing and selection in order form.
-- [x] Ensure form submission works with IDs.
-- [x] Verify no breaking changes in other parts of the app.
+## Steps to Complete
+- [x] Add "Edit" button in orders table actions between View and Refund in frontend/index.html
+- [x] Modify viewOrder modal to include edit mode toggle
+- [x] Implement inline editing in viewOrder modal (client, items, deposit, discount, payment method)
+- [x] Add save/cancel buttons in edit mode
+- [x] Add PUT /:id route in backend/routes/orders.js for updating orders
+- [x] Handle stock adjustments and totals recalculation in backend
+- [x] Refresh orders list after update
+- [x] Update TODO.md with completed steps
+- [ ] Test edit functionality in modal
+- [ ] Verify stock adjustments on qty changes
+- [ ] Verify totals and balance updates

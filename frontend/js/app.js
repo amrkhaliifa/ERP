@@ -864,8 +864,14 @@ if (!orderForm) {
           }
           discount = parseFloat(discount || 0);
 
-          await json(`${API}/orders`, {
-            method: "POST",
+          // Check if editing
+          const editOrderIdInput = document.getElementById("editOrderId");
+          const isEdit = editOrderIdInput && editOrderIdInput.value;
+          const method = isEdit ? "PUT" : "POST";
+          const url = isEdit ? `${API}/orders/${editOrderIdInput.value}` : `${API}/orders`;
+
+          await json(url, {
+            method,
             body: JSON.stringify({
               clientId,
               deposit,
@@ -880,9 +886,11 @@ if (!orderForm) {
           orderForm.reset();
           orderItems = [];
           renderOrderItems();
+          // Remove edit marker if present
+          if (editOrderIdInput) editOrderIdInput.remove();
           await refreshAll();
         } catch (err) {
-            alert(err.message || "Failed to create order.");
+            alert(err.message || "Failed to save order.");
         }
     });
 }
@@ -955,6 +963,9 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
             <div class="row g-1">
               <div class="col-auto">
                 <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-warning" onclick="editOrder(${id})">Edit</button>
               </div>
               <div class="col-auto">
                 <button class="btn btn-sm btn-outline-danger" onclick="refundOrder(${id})">Refund</button>
@@ -1175,6 +1186,75 @@ async function refundOrder(orderId) {
   }
 }
 
+// Edit order in modal
+async function editOrder(orderId) {
+  try {
+    const order = await json(`${API}/orders/${orderId}`);
+    if (!order) {
+      alert("Order not found.");
+      return;
+    }
+
+    // Create modal if not exists
+    let modal = document.getElementById("editOrderModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "editOrderModal";
+      modal.className = "modal";
+      modal.innerHTML = `
+        <div class="modal-backdrop" data-dismiss="modal"></div>
+        <div class="modal-content" role="dialog" aria-modal="true" style="max-width: 900px;">
+          <header class="modal-header">
+            <h3>Edit Order - #${orderId}</h3>
+            <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+          </header>
+          <div id="editOrderContent" class="modal-body">
+            <!-- Content will be populated here -->
+          </div>
+          <footer class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+            <button type="button" id="saveEditOrderBtn" class="btn btn-success">Save Changes</button>
+          </footer>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      // Attach dismiss handlers
+      modal.querySelectorAll("[data-dismiss='modal']").forEach((el) => {
+        el.addEventListener("click", () => {
+          modal.classList.remove("show");
+          modal.setAttribute("aria-hidden", "true");
+        });
+      });
+      const backdrop = modal.querySelector(".modal-backdrop");
+      if (backdrop) {
+        backdrop.addEventListener("click", () => {
+          modal.classList.remove("show");
+          modal.setAttribute("aria-hidden", "true");
+        });
+      }
+    }
+
+    // Populate modal content
+    const content = document.getElementById("editOrderContent");
+    if (content) {
+      renderOrderView(order, orderId, content, true);
+    }
+
+    // Attach save button handler
+    const saveBtn = document.getElementById("saveEditOrderBtn");
+    if (saveBtn) {
+      saveBtn.onclick = () => saveOrderChanges(orderId, content);
+    }
+
+    // Show modal
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+  } catch (err) {
+    alert(err.message || "Failed to load order for editing.");
+  }
+}
+
 // View order details in modal
 async function viewOrder(orderId) {
   try {
@@ -1362,9 +1442,9 @@ async function viewOrder(orderId) {
               `
                 )
                 .join("")}
-            </tbody>
-          </table>
-        `
+          </tbody>
+        </table>
+      `
             : ""
         }
       `;
@@ -1375,6 +1455,342 @@ async function viewOrder(orderId) {
     modal.setAttribute("aria-hidden", "false");
   } catch (err) {
     alert(err.message || "Failed to load order details.");
+  }
+}
+
+// Render order view (view or edit mode)
+function renderOrderView(order, orderId, content, isEditMode) {
+  // Resolve client name and ID
+  let clientName = "";
+  let clientId = null;
+  if (order.client) {
+    if (typeof order.client === "string") clientName = order.client;
+    else if (typeof order.client === "object") {
+      clientName = order.client.name ?? order.client.clientName ?? "";
+      clientId = order.client.id ?? order.clientId ?? order.client_id;
+    }
+  }
+  clientName = clientName || order.clientName || order.client_name || "Unknown";
+  clientId = clientId ?? order.clientId ?? order.client_id;
+
+  const subtotal = Number(order.subtotal ?? order.total ?? 0);
+  const calcPaid = (r) => {
+    if (r == null) return 0;
+    if (r.paid != null) return Number(r.paid) || 0;
+    if (r.paid_amount != null) return Number(r.paid_amount) || 0;
+    if (r.payments_total != null) return Number(r.payments_total) || 0;
+    if (Array.isArray(r.payments) && r.payments.length) {
+      return r.payments.reduce(
+        (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+        0
+      );
+    }
+    if (
+      r.payments &&
+      typeof r.payments === "object" &&
+      r.payments.total != null
+    )
+      return Number(r.payments.total) || 0;
+    return 0;
+  };
+  const paid = calcPaid(order);
+  const discount = Number(order.discount || 0);
+  const orderTotal = subtotal - discount;
+  const balance = paid - orderTotal;
+  const date = order.created_at ?? order.date ?? order.createdAt ?? "";
+
+  if (isEditMode) {
+    // Edit mode content
+    content.innerHTML = `
+      <form id="editOrderForm">
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <label for="editClientSelect" class="form-label"><strong>Client:</strong></label>
+            <select id="editClientSelect" class="form-control" required>
+              <option value="">Select a client</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <strong>Date:</strong> ${formatDate(date)}
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <label for="editDeposit" class="form-label"><strong>Deposit:</strong></label>
+            <input type="number" id="editDeposit" class="form-control" step="0.01" value="${order.deposit ?? paid ?? 0}">
+          </div>
+          <div class="col-md-3">
+            <label for="editDiscount" class="form-label"><strong>Discount:</strong></label>
+            <input type="number" id="editDiscount" class="form-control" step="0.01" value="${discount}">
+          </div>
+          <div class="col-md-3">
+            <label for="editPaymentMethod" class="form-label"><strong>Payment Method:</strong></label>
+            <select id="editPaymentMethod" class="form-control">
+              <option value="Cash" ${order.payment_method === "Cash" ? "selected" : ""}>Cash</option>
+              <option value="Installment" ${order.payment_method === "Installment" ? "selected" : ""}>Installment</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <strong>Subtotal:</strong> ${formatCurrency(subtotal)}<br>
+            <strong>Order Total:</strong> ${formatCurrency(orderTotal)}<br>
+            <strong>Balance:</strong> <span class="${balance < 0 ? "text-danger" : ""}">${formatCurrency(balance)}</span>
+          </div>
+        </div>
+        <h5>Order Items</h5>
+        <div id="editOrderItems">
+          <!-- Items will be populated here -->
+        </div>
+        <div class="mb-3">
+          <button type="button" id="addItemToOrder" class="btn btn-outline-primary btn-sm">Add Item</button>
+        </div>
+      </form>
+    `;
+
+    // Populate client select
+    const clientSelect = document.getElementById("editClientSelect");
+    if (clientSelect) {
+      clientSelect.innerHTML = `<option value="">Select a client</option>` +
+        clients.map((c) => `<option value="${c.id}" ${c.id == clientId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("");
+      makeSearchable(clientSelect);
+    }
+
+    // Populate items
+    const itemsContainer = document.getElementById("editOrderItems");
+    if (itemsContainer && Array.isArray(order.items)) {
+      itemsContainer.innerHTML = order.items.map((item, index) => `
+        <div class="row mb-2 align-items-center" data-item-index="${index}">
+          <div class="col-md-4">
+            <select class="form-control edit-item-product" required>
+              <option value="">Select product</option>
+              ${products.map(p => `<option value="${p.id}" ${p.id == (item.productId ?? item.product_id ?? item.id) ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <input type="number" class="form-control edit-item-qty" min="1" step="0.01" value="${item.qty ?? item.quantity ?? 0}" required>
+          </div>
+          <div class="col-md-2">
+            <span class="form-text">${escapeHtml(item.unit || "")}</span>
+          </div>
+          <div class="col-md-2">
+            <span class="form-text">${formatCurrency(item.unit_price ?? item.price ?? 0)}</span>
+          </div>
+          <div class="col-md-2">
+            <button type="button" class="btn btn-outline-danger btn-sm remove-edit-item">Remove</button>
+          </div>
+        </div>
+      `).join("");
+
+      // Make product selects searchable
+      itemsContainer.querySelectorAll(".edit-item-product").forEach(select => makeSearchable(select));
+    }
+
+    // Add item button
+    const addItemBtn = document.getElementById("addItemToOrder");
+    if (addItemBtn) {
+      addItemBtn.onclick = () => addEditItem(itemsContainer);
+    }
+
+    // Remove item handlers
+    itemsContainer.addEventListener("click", (e) => {
+      if (e.target.classList.contains("remove-edit-item")) {
+        e.target.closest(".row").remove();
+      }
+    });
+
+  } else {
+    // View mode content
+    content.innerHTML = `
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <strong>Client:</strong> ${escapeHtml(clientName)}
+        </div>
+        <div class="col-md-6">
+          <strong>Date:</strong> ${formatDate(date)}
+        </div>
+      </div>
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <strong>Deposit:</strong> ${formatCurrency(paid)}
+        </div>
+        <div class="col-md-3">
+          <strong>Discount:</strong> ${formatCurrency(discount)}
+        </div>
+        <div class="col-md-3">
+          <strong>Subtotal:</strong> ${formatCurrency(subtotal)}
+        </div>
+        <div class="col-md-3">
+          <strong>Balance:</strong> <span class="${
+            balance < 0 ? "text-danger" : ""
+          }">${formatCurrency(balance)}</span>
+        </div>
+      </div>
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <strong>Payment Method:</strong> ${escapeHtml(
+            order.payment_method || "Cash"
+          )}
+        </div>
+        <div class="col-md-6">
+          <strong>Order Total:</strong> ${formatCurrency(orderTotal)}
+        </div>
+      </div>
+      <h5>Order Items</h5>
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Qty</th>
+            <th>Unit</th>
+            <th>Cost</th>
+            <th>Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            Array.isArray(order.items)
+              ? order.items
+                  .map(
+                    (item) => `
+            <tr>
+              <td>${escapeHtml(item.product_name || item.name || "")}</td>
+              <td>${item.qty || 0}</td>
+              <td>${escapeHtml(item.unit || "")}</td>
+              <td>${formatCurrency(
+                item.unit_cost_snapshot || item.cost_price || 0
+              )}</td>
+              <td>${formatCurrency(item.unit_price || 0)}</td>
+              <td>${formatCurrency(
+                (item.qty || 0) * (item.unit_price || 0)
+              )}</td>
+            </tr>
+          `
+                  )
+                  .join("")
+              : ""
+          }
+        </tbody>
+      </table>
+      ${
+        Array.isArray(order.payments) && order.payments.length
+          ? `
+        <h5>Payments</h5>
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Method</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${order.payments
+              .map(
+                (payment) => `
+              <tr>
+                <td>${formatDate(
+                  payment.date ?? payment.created_at ?? payment.paid_at ?? ""
+                )}</td>
+                <td>${formatCurrency(
+                  payment.amount ?? payment.paid ?? 0
+                )}</td>
+                <td>${escapeHtml(order.payment_method || "Cash")}</td>
+              </tr>
+            `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      `
+          : ""
+      }
+    `;
+  }
+}
+
+
+
+// Add new item to edit form
+function addEditItem(container) {
+  const newItem = document.createElement("div");
+  newItem.className = "row mb-2 align-items-center";
+  newItem.innerHTML = `
+    <div class="col-md-4">
+      <select class="form-control edit-item-product" required>
+        <option value="">Select product</option>
+        ${products.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <input type="number" class="form-control edit-item-qty" min="1" step="0.01" value="1" required>
+    </div>
+    <div class="col-md-2">
+      <span class="form-text">Unit</span>
+    </div>
+    <div class="col-md-2">
+      <span class="form-text">Price</span>
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-outline-danger btn-sm remove-edit-item">Remove</button>
+    </div>
+  `;
+  container.appendChild(newItem);
+  makeSearchable(newItem.querySelector(".edit-item-product"));
+}
+
+// Save order changes
+async function saveOrderChanges(orderId, content) {
+  try {
+    const form = document.getElementById("editOrderForm");
+    if (!form) return;
+
+    const clientId = document.getElementById("editClientSelect").value;
+    const deposit = parseFloat(document.getElementById("editDeposit").value || 0);
+    const discount = parseFloat(document.getElementById("editDiscount").value || 0);
+    const paymentMethod = document.getElementById("editPaymentMethod").value;
+
+    // Collect items
+    const items = [];
+    const itemRows = content.querySelectorAll("#editOrderItems .row");
+    for (const row of itemRows) {
+      const productSelect = row.querySelector(".edit-item-product");
+      const qtyInput = row.querySelector(".edit-item-qty");
+      if (productSelect && qtyInput) {
+        const productId = parseInt(productSelect.value);
+        const qty = parseFloat(qtyInput.value);
+        if (productId && qty > 0) {
+          items.push({ productId, qty });
+        }
+      }
+    }
+
+    if (!clientId || !items.length) {
+      alert("Please select a client and add at least one item.");
+      return;
+    }
+
+    await json(`${API}/orders/${orderId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        clientId: parseInt(clientId),
+        deposit,
+        items,
+        paymentMethod,
+        discount,
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    alert("Order updated successfully!");
+    // Refresh and close modal
+    await refreshAll();
+    const modal = document.getElementById("viewOrderModal");
+    if (modal) {
+      modal.classList.remove("show");
+      modal.setAttribute("aria-hidden", "true");
+    }
+  } catch (err) {
+    alert(err.message || "Failed to update order.");
   }
 }
 

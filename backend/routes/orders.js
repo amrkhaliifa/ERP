@@ -140,6 +140,99 @@ ro.post("/", (req, res) => {
   }
 });
 
+ro.put("/:id", (req, res) => {
+  const orderId = req.params.id;
+  const { clientId, items = [], deposit = 0, paymentMethod, discount = 0 } = req.body;
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  if (!Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: "items required" });
+  if (!paymentMethod) return res.status(400).json({ error: "paymentMethod required" });
+
+  const client = db3
+    .prepare("SELECT id FROM clients WHERE id = ?")
+    .get(clientId);
+  if (!client) return res.status(400).json({ error: "Client not found" });
+
+  const order = db3.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+
+  const trx = db3.transaction(() => {
+    // Get old items to restore stock
+    const oldItems = db3
+      .prepare("SELECT product_id, qty FROM order_items WHERE order_id = ?")
+      .all(orderId);
+
+    // Restore stock for old items
+    const updStock = db3.prepare(
+      "UPDATE products SET stock_qty = stock_qty + ? WHERE id = ?"
+    );
+    for (const it of oldItems) {
+      updStock.run(Number(it.qty), it.product_id);
+    }
+
+    // Delete old order items
+    db3.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
+
+    // Update order details
+    db3.prepare(
+      "UPDATE orders SET client_id = ?, deposit_paid = ?, discount = ?, payment_method = ? WHERE id = ?"
+    ).run(clientId, Number(deposit || 0), Number(discount || 0), paymentMethod, orderId);
+
+    // Insert new items
+    const insItem = db3.prepare(
+      "INSERT INTO order_items(order_id, product_id, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, ?, ?, ?)"
+    );
+    const deductStock = db3.prepare(
+      "UPDATE products SET stock_qty = stock_qty - ? WHERE id = ?"
+    );
+
+    for (const it of items) {
+      const product = db3
+        .prepare("SELECT * FROM products WHERE id = ?")
+        .get(it.productId);
+      if (!product) throw new Error(`Product ${it.productId} not found`);
+      if (product.stock_qty < it.qty)
+        throw new Error(
+          `Not enough stock for ${product.name}. In stock: ${product.stock_qty}`
+        );
+      const unitPrice = it.unitPrice ?? product.default_sale_price;
+      insItem.run(
+        orderId,
+        product.id,
+        Number(it.qty),
+        Number(unitPrice),
+        Number(product.cost_price)
+      );
+      deductStock.run(Number(it.qty), product.id);
+    }
+
+    // Update deposit payment (assuming only one deposit payment)
+    const existingDeposit = db3
+      .prepare("SELECT id FROM payments WHERE order_id = ? AND note = 'Deposit'")
+      .get(orderId);
+    if (Number(deposit) > 0) {
+      if (existingDeposit) {
+        db3.prepare("UPDATE payments SET amount = ? WHERE id = ?").run(Number(deposit), existingDeposit.id);
+      } else {
+        db3.prepare("INSERT INTO payments(order_id, amount, note) VALUES (?, ?, ?)").run(orderId, Number(deposit), "Deposit");
+      }
+    } else if (existingDeposit) {
+      db3.prepare("DELETE FROM payments WHERE id = ?").run(existingDeposit.id);
+    }
+
+    recalcTotals(orderId);
+    return orderId;
+  });
+
+  try {
+    const updatedOrderId = trx();
+    const saved = db3.prepare("SELECT * FROM orders WHERE id = ?").get(updatedOrderId);
+    res.json(saved);
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+
 ro.delete("/:id", (req, res) => {
   const orderId = req.params.id;
   const order = db3.prepare("SELECT id FROM orders WHERE id = ?").get(orderId);
