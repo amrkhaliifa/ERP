@@ -359,36 +359,198 @@ async function editClient(id) {
 // Load clients into order form select
 async function loadClientsForOrder() {
     const rows = await json(`${API}/clients`);
-    const sel = document.getElementById("orderClient");
-    if (!sel) return;
-    // keep the placeholder option, then append real options
-    const placeholder = `<option value="" selected disabled>Select client</option>`;
-    sel.innerHTML =
-        placeholder +
-        (rows || [])
-        .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
-        .join("");
+  clients = rows || [];
+  const select = document.getElementById("orderClient");
+  if (!select) return;
+  select.innerHTML =
+    `<option value="">Select a client</option>` +
+    clients
+      .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
+      .join("");
+  makeSearchable(select);
+    
+    const input = document.getElementById("orderClient");
+    if (input) makeSearchable(input);
 }
 
 async function loadProductsForOrder() {
     const rows = await json(`${API}/products`);
-    const sel = document.getElementById("orderProduct");
-    if (!sel) return;
-    const placeholder = `<option value="" selected disabled>Select product</option>`;
-    sel.innerHTML =
-        placeholder +
-        (rows || [])
-        .map(
-            (p) =>
-            `<option value="${p.id}" data-name="${escapeHtml(
-            p.name
-          )}" data-unit="${escapeHtml(p.unit || "")}" data-cost-price="${
-            p.cost_price || 0
-          }" data-price="${p.default_sale_price || 0}">${escapeHtml(
-            p.name
-          )}</option>`
-        )
-        .join("");
+    products = rows || [];
+    const select = document.getElementById("orderProduct");
+    if (!select) return;
+    select.innerHTML = `<option value="">Select a product</option>` +
+        products.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+    makeSearchable(select);
+}
+
+// Make select searchable
+function makeSearchable(select) {
+    if (!select || select.dataset.searchable) return;
+    select.dataset.searchable = "true";
+
+    // Create wrapper
+    const wrapper = document.createElement("div");
+    wrapper.className = "searchable-select-wrapper";
+    wrapper.style.position = "relative";
+    select.parentNode.insertBefore(wrapper, select);
+    wrapper.appendChild(select);
+
+    // Create input for searching
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "form-control searchable-input";
+    input.placeholder = "";
+    wrapper.appendChild(input);
+
+    // Create dropdown list
+    const dropdown = document.createElement("div");
+    dropdown.className = "searchable-dropdown";
+    dropdown.style.display = "none";
+    dropdown.style.position = "absolute";
+    dropdown.style.top = "100%";
+    dropdown.style.left = "0";
+    dropdown.style.right = "0";
+    dropdown.style.background = "white";
+    dropdown.style.border = "1px solid #ccc";
+    dropdown.style.borderTop = "none";
+    dropdown.style.maxHeight = "200px";
+    dropdown.style.overflowY = "auto";
+    dropdown.style.zIndex = "1000";
+    wrapper.appendChild(dropdown);
+
+    let options = Array.from(select.options).filter(o => o.value !== ""); // Exclude placeholder
+    let filteredOptions = [...options];
+    let currentIndex = -1;
+
+    function updateDropdown() {
+        dropdown.innerHTML = "";
+        filteredOptions.forEach((option, index) => {
+            const item = document.createElement("div");
+            item.className = "searchable-option";
+            item.textContent = option.textContent;
+            item.style.padding = "8px 12px";
+            item.style.cursor = "pointer";
+            item.style.borderBottom = "1px solid #eee";
+            if (index === currentIndex) {
+                item.classList.add("highlighted");
+                item.style.backgroundColor = "#007bff";
+                item.style.color = "white";
+            }
+            item.addEventListener("click", () => {
+                selectOption(option);
+            });
+            item.addEventListener("mouseenter", () => {
+                if (index !== currentIndex) {
+                    item.style.backgroundColor = "#f8f9fa";
+                    item.style.color = "black";
+                }
+            });
+            item.addEventListener("mouseleave", () => {
+                if (index !== currentIndex) {
+                    item.style.backgroundColor = "white";
+                    item.style.color = "black";
+                }
+            });
+            dropdown.appendChild(item);
+        });
+    }
+
+    function selectOption(option) {
+        select.value = option.value;
+        input.value = option.textContent;
+        dropdown.style.display = "none";
+        currentIndex = -1;
+        select.dispatchEvent(new Event("change"));
+    }
+
+    function highlightOption(index) {
+        const items = dropdown.querySelectorAll(".searchable-option");
+        items.forEach((item, i) => {
+            if (i === index) {
+                item.classList.add("highlighted");
+                item.style.backgroundColor = "#007bff";
+                item.style.color = "white";
+            } else {
+                item.classList.remove("highlighted");
+                item.style.backgroundColor = "white";
+                item.style.color = "black";
+            }
+        });
+    }
+
+    input.addEventListener("input", () => {
+        const query = input.value.toLowerCase();
+        filteredOptions = options.filter(option =>
+            option.textContent.toLowerCase().includes(query)
+        );
+        currentIndex = filteredOptions.length > 0 ? 0 : -1;
+        updateDropdown();
+        if (dropdown.style.display !== "block") {
+            dropdown.style.display = "block";
+        }
+    });
+
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (currentIndex < filteredOptions.length - 1) {
+                currentIndex++;
+                highlightOption(currentIndex);
+            }
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (currentIndex > 0) {
+                currentIndex--;
+                highlightOption(currentIndex);
+            }
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (currentIndex >= 0 && currentIndex < filteredOptions.length) {
+                selectOption(filteredOptions[currentIndex]);
+            }
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            dropdown.style.display = "none";
+            currentIndex = -1;
+        }
+    });
+
+    input.addEventListener("focus", () => {
+        filteredOptions = [...options];
+        currentIndex = filteredOptions.length > 0 ? 0 : -1;
+        updateDropdown();
+        dropdown.style.display = "block";
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (input.value.trim() === "") {
+                select.value = "";
+                dropdown.style.display = "none";
+                currentIndex = -1;
+                return;
+            }
+            const lowerInput = input.value.toLowerCase();
+            const matchingOption = options.find(o => o.textContent.toLowerCase().includes(lowerInput));
+            if (matchingOption) {
+                select.value = matchingOption.value;
+                input.value = matchingOption.textContent;
+                select.dispatchEvent(new Event("change"));
+            } else {
+                select.value = "";
+                input.value = "";
+            }
+            dropdown.style.display = "none";
+            currentIndex = -1;
+        }, 150);
+    });
+
+    // Hide select, show input
+    select.style.display = "none";
+    input.style.display = "block";
+
+    // Initial setup
+    updateDropdown();
 }
 
 // Products
@@ -531,6 +693,8 @@ if (productForm) {
 // Orders
 let orderItems = [];
 let currentOrderDateFilter = null;
+let clients = [];
+let products = [];
 
 function renderOrderItems() {
     const tbody = document.querySelector("#orderItemsTable tbody");
@@ -575,21 +739,21 @@ function escapeHtml(s = "") {
 const addItemBtn = document.getElementById("addItemBtn");
 if (addItemBtn) {
     addItemBtn.addEventListener("click", () => {
-        const prodSel = document.getElementById("orderProduct");
+        const prodInput = document.getElementById("orderProduct");
         const qtyEl = document.getElementById("orderQty");
-        if (!prodSel || !qtyEl)
+        if (!prodInput || !qtyEl)
             return alert("Product selector or quantity missing.");
-        const productId = parseInt(prodSel.value);
-        if (!productId) return alert("Select a product.");
-        const name =
-            prodSel.options[prodSel.selectedIndex] ?.dataset ?.name ||
-            prodSel.options[prodSel.selectedIndex] ?.text;
+      const productId = parseInt(prodInput.value);
+      if (!productId || !products) return alert("Select a valid product.");
+      const product = products.find((p) => p.id === productId);
+      
+        if (!product) return alert("Product not found.");
+        
+        const name = product.name;
         const qty = Math.max(1, parseFloat(qtyEl.value || 1));
-        const unit = prodSel.options[prodSel.selectedIndex] ?.dataset ?.unit || "";
-        const cost_price = parseFloat(
-            prodSel.selectedOptions[0].dataset.costPrice || 0
-        );
-        const price = parseFloat(prodSel.selectedOptions[0].dataset.price || 0);
+        const unit = product.unit || "";
+        const cost_price = product.cost_price || 0;
+        const price = product.default_sale_price || 0;
         const existing = orderItems.find((i) => i.productId === productId);
         if (existing) {
             existing.qty += qty;
@@ -597,6 +761,9 @@ if (addItemBtn) {
             orderItems.push({ productId, name, qty, unit, cost_price, price });
         }
         renderOrderItems();
+        // clear inputs
+        prodInput.value = "";
+        qtyEl.value = 1;
     });
 }
 
@@ -623,89 +790,97 @@ if (!orderForm) {
     orderForm.addEventListener("submit", async(e) => {
         e.preventDefault();
         try {
-            const fd = new FormData(orderForm);
+          const fd = new FormData(orderForm);
 
-            // clientId
-            let clientId = fd.get("clientId");
-            if (!clientId) {
-                const sel = document.getElementById("orderClient");
-                clientId = sel ? sel.value : null;
+          // clientId
+          let clientId = fd.get("clientId");
+          if (!clientId) {
+            const sel = document.getElementById("orderClient");
+             clientId = sel ? sel.value : null;
+          }
+          clientId = parseInt(clientId);
+          if (!clientId || Number.isNaN(clientId)) {
+            alert("Please select a client for the order.");
+            return;
+          }
+
+          // deposit
+          let deposit = fd.get("deposit");
+          if (deposit == null) {
+            const depEl = document.getElementById("deposit");
+            deposit = depEl ? depEl.value : "0";
+          }
+          deposit = parseFloat(deposit || 0);
+
+          // items: prefer in-memory orderItems, fallback to hidden input / FormData
+          let items = [];
+          if (orderItems && orderItems.length) {
+            items = orderItems.map((it) => ({
+              productId: it.productId,
+              qty: it.qty,
+            }));
+          } else {
+            const itemsRaw =
+              fd.get("items") ||
+              document.getElementById("items")?.value ||
+              "[]";
+            try {
+              items = JSON.parse(itemsRaw);
+            } catch {
+              items = [];
             }
-            clientId = parseInt(clientId);
-            if (!clientId || Number.isNaN(clientId)) {
-                alert("Please select a client for the order.");
-                return;
-            }
+          }
 
-            // deposit
-            let deposit = fd.get("deposit");
-            if (deposit == null) {
-                const depEl = document.getElementById("deposit");
-                deposit = depEl ? depEl.value : "0";
-            }
-            deposit = parseFloat(deposit || 0);
+          if (!Array.isArray(items) || items.length === 0) {
+            alert("No items in the order. Add at least one product.");
+            return;
+          }
 
-            // items: prefer in-memory orderItems, fallback to hidden input / FormData
-            let items = [];
-            if (orderItems && orderItems.length) {
-                items = orderItems.map((it) => ({
-                    productId: it.productId,
-                    qty: it.qty,
-                }));
-            } else {
-                const itemsRaw =
-                    fd.get("items") || document.getElementById("items") ?.value || "[]";
-                try {
-                    items = JSON.parse(itemsRaw);
-                } catch {
-                    items = [];
-                }
-            }
+          // normalize
+          items = items
+            .map((it) => ({
+              productId: parseInt(it.productId),
+              qty: parseFloat(it.qty || 0),
+            }))
+            .filter((it) => it.productId && it.qty > 0);
 
-            if (!Array.isArray(items) || items.length === 0) {
-                alert("No items in the order. Add at least one product.");
-                return;
-            }
+          if (items.length === 0) {
+            alert("No valid items found for the order.");
+            return;
+          }
 
-            // normalize
-            items = items
-                .map((it) => ({
-                    productId: parseInt(it.productId),
-                    qty: parseFloat(it.qty || 0),
-                }))
-                .filter((it) => it.productId && it.qty > 0);
+          // paymentMethod
+          let paymentMethod = fd.get("paymentMethod");
+          if (!paymentMethod) {
+            const pmEl = document.getElementById("paymentMethod");
+            paymentMethod = pmEl ? pmEl.value : "Cash";
+          }
 
-            if (items.length === 0) {
-                alert("No valid items found for the order.");
-                return;
-            }
+          // discount
+          let discount = fd.get("discount");
+          if (discount == null) {
+            const discEl = document.getElementById("discount");
+            discount = discEl ? discEl.value : "0";
+          }
+          discount = parseFloat(discount || 0);
 
-            // paymentMethod
-            let paymentMethod = fd.get("paymentMethod");
-            if (!paymentMethod) {
-                const pmEl = document.getElementById("paymentMethod");
-                paymentMethod = pmEl ? pmEl.value : "Cash";
-            }
+          await json(`${API}/orders`, {
+            method: "POST",
+            body: JSON.stringify({
+              clientId,
+              deposit,
+              items,
+              paymentMethod,
+              discount,
+            }),
+            headers: { "Content-Type": "application/json" },
+          });
 
-            // discount
-            let discount = fd.get("discount");
-            if (discount == null) {
-                const discEl = document.getElementById("discount");
-                discount = discEl ? discEl.value : "0";
-            }
-            discount = parseFloat(discount || 0);
-
-            await json(`${API}/orders`, {
-                method: "POST",
-                body: JSON.stringify({ clientId, deposit, items, paymentMethod, discount }),
-                headers: { "Content-Type": "application/json" },
-            });
-
-            // clear UI and internal items
-            orderForm.reset();
-            orderItems = [];
-            renderOrderItems();
-            await refreshAll();
+          // clear UI and internal items
+          orderForm.reset();
+          orderItems = [];
+          renderOrderItems();
+          await refreshAll();
         } catch (err) {
             alert(err.message || "Failed to create order.");
         }

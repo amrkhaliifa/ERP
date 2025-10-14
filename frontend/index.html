@@ -106,11 +106,16 @@
                 <form id="orderForm" class="row g-2">
                     <div class="col-md-4">
                         <label for="orderClient" class="form-label">Client</label>
-                        <select id="orderClient" name="clientId" class="form-select"></select>
+                        <select id="orderClient" name="clientId" class="form-select searchable-select" required>
+                            <option value="">Select a client</option>
+                        </select>
+                        
                     </div>
                     <div class="col-md-4">
                         <label for="orderProduct" class="form-label">Product</label>
-                        <select id="orderProduct" name="productId" class="form-select"></select>
+                        <select id="orderProduct" name="productId" class="form-select searchable-select" required>
+                            <option value="">Select a product</option>
+                        </select>
                     </div>
                     <div class="col-md-2">
                         <label for="orderQty" class="form-label">Qty</label>
