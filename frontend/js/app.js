@@ -1114,7 +1114,9 @@ async function viewOrder(orderId) {
         </div>
         <div class="row mb-3">
           <div class="col-md-6">
-            <strong>Payment Method:</strong> ${escapeHtml(order.payment_method || "Cash")}
+            <strong>Payment Method:</strong> ${escapeHtml(
+              order.payment_method || "Cash"
+            )}
           </div>
           <div class="col-md-6">
             <strong>Order Total:</strong> ${formatCurrency(orderTotal)}
@@ -1180,7 +1182,7 @@ async function viewOrder(orderId) {
                   <td>${formatCurrency(
                     payment.amount ?? payment.paid ?? 0
                   )}</td>
-                  <td>${escapeHtml(payment.note ?? order.payment_method ?? "Cash")}</td>
+                  <td>${escapeHtml(order.payment_method || "Cash")}</td>
                 </tr>
               `
                 )
@@ -1266,7 +1268,7 @@ if (paymentMethodSel) {
     const depositEl = document.getElementById("deposit");
     const depositLabel = document.getElementById("depositLabel");
     if (method === "Cash") {
-      depositLabel.textContent = "Deposit";
+      depositLabel.textContent = "Cash Received";
       const total =
         parseFloat(
           document
