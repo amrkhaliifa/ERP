@@ -402,6 +402,14 @@ function makeSearchable(select) {
     input.placeholder = "";
     wrapper.appendChild(input);
 
+    // Initialize input with selected option's text if a value is pre-selected
+    if (select.value) {
+        const selectedOption = Array.from(select.options).find(o => o.value == select.value);
+        if (selectedOption) {
+            input.value = selectedOption.textContent;
+        }
+    }
+
     // Create dropdown list
     const dropdown = document.createElement("div");
     dropdown.className = "searchable-dropdown";
@@ -1244,7 +1252,7 @@ async function editOrder(orderId) {
     // Attach save button handler
     const saveBtn = document.getElementById("saveEditOrderBtn");
     if (saveBtn) {
-      saveBtn.onclick = () => saveOrderChanges(orderId, content);
+      saveBtn.onclick = () => saveOrderChanges(orderId, content, modal);
     }
 
     // Show modal
@@ -1505,7 +1513,7 @@ function renderOrderView(order, orderId, content, isEditMode) {
       <form id="editOrderForm">
         <div class="row mb-3">
           <div class="col-md-6">
-            <label for="editClientSelect" class="form-label"><strong>Client:</strong></label>
+            <label for="editClientSelect" class="form-label"><strong>Client:</strong> ${escapeHtml(clientName)}</label>
             <select id="editClientSelect" class="form-control" required>
               <option value="">Select a client</option>
             </select>
@@ -1531,9 +1539,9 @@ function renderOrderView(order, orderId, content, isEditMode) {
             </select>
           </div>
           <div class="col-md-3">
-            <strong>Subtotal:</strong> ${formatCurrency(subtotal)}<br>
-            <strong>Order Total:</strong> ${formatCurrency(orderTotal)}<br>
-            <strong>Balance:</strong> <span class="${balance < 0 ? "text-danger" : ""}">${formatCurrency(balance)}</span>
+            <strong>Subtotal:</strong> <span id="editSubtotal">${formatCurrency(subtotal)}</span><br>
+            <strong>Order Total:</strong> <span id="editOrderTotal">${formatCurrency(orderTotal)}</span><br>
+            <strong>Balance:</strong> <span id="editBalance" class="${balance < 0 ? "text-danger" : ""}">${formatCurrency(balance)}</span>
           </div>
         </div>
         <h5>Order Items</h5>
@@ -1562,17 +1570,17 @@ function renderOrderView(order, orderId, content, isEditMode) {
           <div class="col-md-4">
             <select class="form-control edit-item-product" required>
               <option value="">Select product</option>
-              ${products.map(p => `<option value="${p.id}" ${p.id == (item.productId ?? item.product_id ?? item.id) ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
+              ${products.map(p => `<option value="${p.id}" ${p.id == item.product_id ? "selected" : ""}>${escapeHtml(p.name)} (${escapeHtml(p.unit || "")})</option>`).join("")}
             </select>
           </div>
           <div class="col-md-2">
             <input type="number" class="form-control edit-item-qty" min="1" step="0.01" value="${item.qty ?? item.quantity ?? 0}" required>
           </div>
           <div class="col-md-2">
-            <span class="form-text">${escapeHtml(item.unit || "")}</span>
+            <span class="form-text edit-item-unit">${escapeHtml(item.unit || "")}</span>
           </div>
           <div class="col-md-2">
-            <span class="form-text">${formatCurrency(item.unit_price ?? item.price ?? 0)}</span>
+            <span class="form-text edit-item-price">${formatCurrency(item.unit_price ?? item.price ?? 0)}</span>
           </div>
           <div class="col-md-2">
             <button type="button" class="btn btn-outline-danger btn-sm remove-edit-item">Remove</button>
@@ -1594,6 +1602,40 @@ function renderOrderView(order, orderId, content, isEditMode) {
     itemsContainer.addEventListener("click", (e) => {
       if (e.target.classList.contains("remove-edit-item")) {
         e.target.closest(".row").remove();
+        updateEditTotals();
+      }
+    });
+
+    // Add event listeners for real-time updates
+    const depositInput = document.getElementById("editDeposit");
+    const discountInput = document.getElementById("editDiscount");
+
+    if (depositInput) {
+      depositInput.addEventListener("input", updateEditTotals);
+    }
+    if (discountInput) {
+      discountInput.addEventListener("input", updateEditTotals);
+    }
+
+    // Event listeners for item changes
+    itemsContainer.addEventListener("change", (e) => {
+      if (e.target.classList.contains("edit-item-product")) {
+        const row = e.target.closest(".row");
+        const productId = parseInt(e.target.value);
+        const product = products.find(p => p.id === productId);
+        if (product) {
+          row.querySelector(".edit-item-unit").textContent = escapeHtml(product.unit || "");
+          row.querySelector(".edit-item-price").textContent = formatCurrency(product.default_sale_price || 0);
+        }
+        updateEditTotals();
+      } else if (e.target.classList.contains("edit-item-qty")) {
+        updateEditTotals();
+      }
+    });
+
+    itemsContainer.addEventListener("input", (e) => {
+      if (e.target.classList.contains("edit-item-qty")) {
+        updateEditTotals();
       }
     });
 
@@ -1708,7 +1750,34 @@ function renderOrderView(order, orderId, content, isEditMode) {
   }
 }
 
+// Update totals in edit form
+function updateEditTotals() {
+  const itemsContainer = document.getElementById("editOrderItems");
+  if (!itemsContainer) return;
 
+  let subtotal = 0;
+  const itemRows = itemsContainer.querySelectorAll(".row");
+  itemRows.forEach(row => {
+    const qtyInput = row.querySelector(".edit-item-qty");
+    const priceSpan = row.querySelector(".edit-item-price");
+    if (qtyInput && priceSpan) {
+      const qty = parseFloat(qtyInput.value) || 0;
+      const price = parseFloat(priceSpan.textContent.replace(/[^0-9.-]/g, "")) || 0;
+      subtotal += qty * price;
+    }
+  });
+
+  const discount = parseFloat(document.getElementById("editDiscount").value) || 0;
+  const deposit = parseFloat(document.getElementById("editDeposit").value) || 0;
+  const orderTotal = subtotal - discount;
+  const balance = deposit - orderTotal;
+
+  document.getElementById("editSubtotal").textContent = formatCurrency(subtotal);
+  document.getElementById("editOrderTotal").textContent = formatCurrency(orderTotal);
+  const balanceEl = document.getElementById("editBalance");
+  balanceEl.textContent = formatCurrency(balance);
+  balanceEl.className = balance < 0 ? "text-danger" : "";
+}
 
 // Add new item to edit form
 function addEditItem(container) {
