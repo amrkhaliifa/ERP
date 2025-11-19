@@ -402,7 +402,7 @@ function makeSearchable(select) {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "form-control searchable-input";
-  input.placeholder = "";
+  input.placeholder = "Search...";
   wrapper.appendChild(input);
 
   // Initialize input with selected option's text if a value is pre-selected
@@ -425,7 +425,6 @@ function makeSearchable(select) {
   dropdown.style.right = "0";
   dropdown.style.background = "white";
   dropdown.style.border = "1px solid #ccc";
-  dropdown.style.borderTop = "none";
   dropdown.style.maxHeight = "200px";
   dropdown.style.overflowY = "auto";
   dropdown.style.zIndex = "1000";
@@ -778,6 +777,10 @@ if (addItemBtn) {
     renderOrderItems();
     // clear inputs
     prodInput.value = "";
+    // clear the searchable input as well
+    const prodWrapper = prodInput.parentNode;
+    const prodSearchInput = prodWrapper.querySelector(".searchable-input");
+    if (prodSearchInput) prodSearchInput.value = "";
     qtyEl.value = 1;
   });
 }
@@ -805,14 +808,9 @@ if (!orderForm) {
   orderForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const fd = new FormData(orderForm);
-
       // clientId
-      let clientId = fd.get("clientId");
-      if (!clientId) {
-        const sel = document.getElementById("orderClient");
-        clientId = sel ? sel.value : null;
-      }
+      const clientSel = document.getElementById("orderClient");
+      let clientId = clientSel ? clientSel.value : null;
       clientId = parseInt(clientId);
       if (!clientId || Number.isNaN(clientId)) {
         alert("Please select a client for the order.");
@@ -820,14 +818,11 @@ if (!orderForm) {
       }
 
       // deposit
-      let deposit = fd.get("deposit");
-      if (deposit == null) {
-        const depEl = document.getElementById("deposit");
-        deposit = depEl ? depEl.value : "0";
-      }
+      const depositEl = document.getElementById("deposit");
+      let deposit = depositEl ? depositEl.value : "0";
       deposit = parseFloat(deposit || 0);
 
-      // items: prefer in-memory orderItems, fallback to hidden input / FormData
+      // items: prefer in-memory orderItems, fallback to hidden input
       let items = [];
       if (orderItems && orderItems.length) {
         items = orderItems.map((it) => ({
@@ -835,8 +830,8 @@ if (!orderForm) {
           qty: it.qty,
         }));
       } else {
-        const itemsRaw =
-          fd.get("items") || document.getElementById("items")?.value || "[]";
+        const itemsInput = document.getElementById("items");
+        const itemsRaw = itemsInput ? itemsInput.value : "[]";
         try {
           items = JSON.parse(itemsRaw);
         } catch {
@@ -863,18 +858,12 @@ if (!orderForm) {
       }
 
       // paymentMethod
-      let paymentMethod = fd.get("paymentMethod");
-      if (!paymentMethod) {
-        const pmEl = document.getElementById("paymentMethod");
-        paymentMethod = pmEl ? pmEl.value : "Cash";
-      }
+      const pmEl = document.getElementById("paymentMethod");
+      let paymentMethod = pmEl ? pmEl.value : "Cash";
 
       // discount
-      let discount = fd.get("discount");
-      if (discount == null) {
-        const discEl = document.getElementById("discount");
-        discount = discEl ? discEl.value : "0";
-      }
+      const discEl = document.getElementById("discount");
+      let discount = discEl ? discEl.value : "0";
       discount = parseFloat(discount || 0);
 
       // Check if editing
@@ -1856,17 +1845,35 @@ function addEditItem(container) {
       <input type="number" class="form-control edit-item-qty" min="1" step="1" value="1" required>
     </div>
     <div class="col-md-2">
-      <span class="form-text">Unit</span>
+      <span class="form-text edit-item-unit">Unit</span>
     </div>
     <div class="col-md-2">
-      <span class="form-text">Price</span>
+      <span class="form-text edit-item-price">Price</span>
     </div>
     <div class="col-md-2">
       <button type="button" class="btn btn-outline-danger btn-sm remove-edit-item">Remove</button>
     </div>
   `;
   container.appendChild(newItem);
-  makeSearchable(newItem.querySelector(".edit-item-product"));
+
+  // Attach event listeners for product selection and quantity changes
+  const productSelect = newItem.querySelector(".edit-item-product");
+  productSelect.addEventListener("change", () => {
+    const productId = parseInt(productSelect.value);
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      newItem.querySelector(".edit-item-unit").textContent = escapeHtml(
+        product.unit || ""
+      );
+      newItem.querySelector(".edit-item-price").textContent = formatCurrency(
+        product.default_sale_price || 0
+      );
+    }
+    updateEditTotals();
+  });
+
+  const qtyInput = newItem.querySelector(".edit-item-qty");
+  qtyInput.addEventListener("input", updateEditTotals);
 }
 
 // Save order changes
