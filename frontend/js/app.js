@@ -996,55 +996,130 @@ async function loadOrders(dateFilter = currentOrderDateFilter) {
 }
 
 // Reports
-async function loadOutstanding() {
+async function loadOutstanding(from = null, to = null, clientId = null) {
   try {
-    const rows = await json(`${API}/reports/outstanding`);
+    const rows = await json(`${API}/orders`);
+    let filteredRows = rows || [];
+
+    // Filter by client if specified
+    if (clientId) {
+      filteredRows = filteredRows.filter((order) => {
+        let cid = null;
+        if (order.client && typeof order.client === "object") {
+          cid = order.client.id ?? order.clientId ?? order.client_id;
+        } else {
+          cid = order.clientId ?? order.client_id ?? order.client;
+        }
+        return String(cid) === String(clientId);
+      });
+    }
+
+    // Filter by date range if specified
+    if (from || to) {
+      filteredRows = filteredRows.filter((order) => {
+        const dateStr = order.created_at ?? order.date ?? "";
+        if (!dateStr) return false;
+        const orderDate = new Date(dateStr);
+        if (isNaN(orderDate)) return false;
+        if (from) {
+          const fromDate = new Date(from);
+          if (orderDate < fromDate) return false;
+        }
+        if (to) {
+          const toDate = new Date(to + "T23:59:59"); // end of day
+          if (orderDate > toDate) return false;
+        }
+        return true;
+      });
+    }
+
     const table = document.getElementById("outstandingTable");
     if (!table) return;
+
     let tbody = table.querySelector("tbody");
     if (!tbody) {
       tbody = document.createElement("tbody");
       table.appendChild(tbody);
     }
 
-    const calcPaid = (r) => {
-      if (r == null) return 0;
-      if (r.paid != null) return Number(r.paid) || 0;
-      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
-      if (r.payments_total != null) return Number(r.payments_total) || 0;
-      if (Array.isArray(r.payments) && r.payments.length) {
-        return r.payments.reduce(
-          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
+    let totalSubtotal = 0;
+    let totalDiscount = 0;
+    let totalPaid = 0;
+    let totalBalance = 0;
+
+    const calcPaid = (order) => {
+      if (!order) return 0;
+      if (order.paid != null) return Number(order.paid) || 0;
+      if (order.paid_amount != null) return Number(order.paid_amount) || 0;
+      if (order.payments_total != null)
+        return Number(order.payments_total) || 0;
+      if (Array.isArray(order.payments) && order.payments.length) {
+        return order.payments.reduce(
+          (sum, payment) => sum + Number(payment.amount ?? payment.paid ?? 0),
           0
         );
       }
-      if (
-        r.payments &&
-        typeof r.payments === "object" &&
-        r.payments.total != null
-      )
-        return Number(r.payments.total) || 0;
       return 0;
     };
 
-    tbody.innerHTML = (rows || [])
+    tbody.innerHTML = filteredRows
       .map((r) => {
-        const subtotal = Number(r.subtotal ?? 0);
+        const id = r.id ?? r.orderId ?? "";
+        const clientName =
+          r.clientName ?? r.client_name ?? r.client ?? "Unknown";
+        const subtotal = Number(r.subtotal ?? r.total ?? 0);
+        const discount = Number(r.discount ?? 0);
         const paid = calcPaid(r);
-        const balance = Number(r.balance ?? paid - subtotal);
+        const balance = paid - (subtotal - discount);
+        const date = r.created_at ?? r.date ?? "Unknown";
+
+        // Accumulate totals
+        totalSubtotal += subtotal;
+        totalDiscount += discount;
+        totalPaid += paid;
+        totalBalance += balance;
+
+        // Apply red color for negative balance (unpaid)
         const balanceClass = balance < 0 ? "text-danger" : "";
+
         return `<tr>
-            <td>${r.id ?? ""}</td>
-            <td>${escapeHtml(r.client ?? r.clientName ?? "")}</td>
-            <td>${subtotal.toFixed(2)}</td>
-            <td>${paid.toFixed(2)}</td>
-            <td class="${balanceClass}">${balance.toFixed(2)}</td>
-            <td>${escapeHtml(r.created_at ?? r.date ?? "")}</td>
-          </tr>`;
+          <td>${id}</td>
+          <td>${escapeHtml(clientName)}</td>
+          <td>${formatCurrency(subtotal)}</td>
+          <td>${formatCurrency(discount)}</td>
+          <td>${formatCurrency(paid)}</td>
+          <td class="${balanceClass}">${formatCurrency(balance)}</td>
+          <td>${escapeHtml(r.payment_method || "Cash")}</td>
+          <td>${formatDate(date)}</td>
+          <td>
+            <div class="row g-1">
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-info" onclick="viewOrder(${id})">View</button>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-warning" onclick="editOrder(${id})">Edit</button>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-danger" onclick="refundOrder(${id})">Refund</button>
+              </div>
+            </div>
+          </td>
+        </tr>`;
       })
       .join("");
+
+    // Update tfoot totals
+    document.getElementById("reportTotalSubtotal").textContent =
+      formatCurrency(totalSubtotal);
+    document.getElementById("reportTotalDiscount").textContent =
+      formatCurrency(totalDiscount);
+    document.getElementById("reportTotalPaid").textContent =
+      formatCurrency(totalPaid);
+    document.getElementById("reportTotalBalance").textContent =
+      formatCurrency(totalBalance);
   } catch (err) {
     console.error("Failed to load outstanding:", err);
+    alert(err.message || "Failed to load outstanding");
   }
 }
 
@@ -1066,109 +1141,71 @@ async function loadReportClients() {
   }
 }
 
+// Add payment from reports tab
+async function addPaymentFromReports(orderId) {
+  const amount = prompt("Enter payment amount:");
+  if (!amount || isNaN(amount) || amount <= 0) return;
+  try {
+    await json(`${API}/payments`, {
+      method: "POST",
+      body: JSON.stringify({
+        orderId: parseInt(orderId),
+        amount: parseFloat(amount),
+      }),
+    });
+    alert("Payment added successfully.");
+    await loadOutstanding(); // Refresh the outstanding table
+  } catch (err) {
+    alert(err.message || "Failed to add payment.");
+  }
+}
+
 async function onReportClientChange() {
   const sel = document.getElementById("reportClient");
   if (!sel) return;
-  const cid = sel.value;
-  if (!cid) {
-    // show aggregated/outstanding view when no client selected
-    await loadOutstanding();
-    return;
-  }
-  await loadClientOrders(parseInt(cid, 10));
+  const clientId = sel.value;
+  const from = document.getElementById("from")?.value;
+  const to = document.getElementById("to")?.value;
+  await loadOutstanding(from, to, clientId || null);
 }
 
-async function loadClientOrders(clientId) {
-  try {
-    const orders = await json(`${API}/orders`);
-    const table = document.getElementById("outstandingTable");
-    if (!table) return;
-    let tbody = table.querySelector("tbody");
-    if (!tbody) {
-      tbody = document.createElement("tbody");
-      table.appendChild(tbody);
-    }
-
-    const filtered = (orders || []).filter((o) => {
-      let cid = null;
-      if (o.client && typeof o.client === "object")
-        cid = o.client.id ?? o.clientId ?? o.client_id;
-      else cid = o.clientId ?? o.client_id ?? o.client;
-      return String(cid) === String(clientId);
-    });
-
-    const calcPaid = (r) => {
-      if (r == null) return 0;
-      if (r.paid != null) return Number(r.paid) || 0;
-      if (r.paid_amount != null) return Number(r.paid_amount) || 0;
-      if (r.payments_total != null) return Number(r.payments_total) || 0;
-      if (Array.isArray(r.payments) && r.payments.length) {
-        return r.payments.reduce(
-          (s, p) => s + Number(p.amount ?? p.paid ?? p.value ?? 0),
-          0
-        );
-      }
-      if (
-        r.payments &&
-        typeof r.payments === "object" &&
-        r.payments.total != null
-      )
-        return Number(r.payments.total) || 0;
-      return 0;
-    };
-
-    tbody.innerHTML = (filtered || [])
-      .map((r) => {
-        const id = r.id ?? r.orderId ?? "";
-        // resolve client name
-        let clientName = "";
-        if (r.client) {
-          if (typeof r.client === "string") clientName = r.client;
-          else if (typeof r.client === "object")
-            clientName = r.client.name ?? r.clientName ?? "";
-        }
-        clientName = clientName || r.clientName || "";
-
-        const subtotal = Number(r.subtotal ?? r.total ?? 0);
-        const paid = calcPaid(r);
-        const balance = Number(r.balance ?? paid - subtotal);
-        const balanceClass = balance < 0 ? "text-danger" : "";
-        const date = r.created_at ?? r.date ?? r.createdAt ?? "";
-        return `<tr>
-          <td>${id}</td>
-          <td>${escapeHtml(clientName)}</td>
-          <td>${formatCurrency(subtotal)}</td>
-          <td>${formatCurrency(paid)}</td>
-          <td class="${balanceClass}">${formatCurrency(balance)}</td>
-          <td>${formatDate(date)}</td>
-        </tr>`;
-      })
-      .join("");
-  } catch (err) {
-    console.error("loadClientOrders failed", err);
-  }
-}
+// loadClientOrders is now replaced by loadOutstanding with clientId
 
 const loadProfitBtn = document.getElementById("loadProfit");
 if (loadProfitBtn) {
   loadProfitBtn.addEventListener("click", async () => {
     const from = document.getElementById("from")?.value;
     const to = document.getElementById("to")?.value;
+    const clientId = document.getElementById("reportClient")?.value;
     const qs = new URLSearchParams({
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
+      ...(clientId ? { clientId } : {}),
     }).toString();
     try {
       const data = await json(`${API}/reports/profit${qs ? "?" + qs : ""}`);
       const d = data.totals || { count: 0, revenue: 0, cost: 0, profit: 0 };
+      const breakdown = data.paymentBreakdown || {};
       const el = document.getElementById("profitTotals");
       if (el) {
-        el.innerHTML = `<div class="alert alert-info">Orders: <b>${
+        let html = `<div class="alert alert-info">Orders: <b>${
           d.count
         }</b> — Revenue: <b>${(d.revenue || 0).toFixed(2)}</b> — Cost: <b>${(
           d.cost || 0
         ).toFixed(2)}</b> — Profit: <b>${(d.profit || 0).toFixed(2)}</b></div>`;
+        html += `<h6>Payment Method Breakdown:</h6><ul>`;
+        for (const [method, stats] of Object.entries(breakdown)) {
+          html += `<li>${method}: Orders: ${stats.count}, Revenue: ${(
+            stats.revenue || 0
+          ).toFixed(2)}, Cost: ${(stats.cost || 0).toFixed(2)}, Profit: ${(
+            stats.profit || 0
+          ).toFixed(2)}</li>`;
+        }
+        html += `</ul>`;
+        el.innerHTML = html;
       }
+      // Reload outstanding with filters
+      await loadOutstanding(from, to, clientId || null);
     } catch (err) {
       console.warn("loadProfit failed", err);
       alert(err.message || "Failed to load profit");

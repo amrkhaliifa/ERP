@@ -35,14 +35,19 @@ ro.get("/", (req, res) => {
   params.push(Number(limit), Number(offset));
   const rows = db3.prepare(query).all(...params);
 
-  // Add items to each order for the list view
-  const ordersWithItems = rows.map(order => {
+  // Add items and payments to each order for the list view
+  const ordersWithItems = rows.map((order) => {
     const items = db3
       .prepare(
         `SELECT oi.*, p.name AS product_name, p.color, p.unit FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`
       )
       .all(order.id);
-    return { ...order, items };
+    const payments = db3
+      .prepare(
+        "SELECT * FROM payments WHERE order_id = ? ORDER BY paid_at ASC, id ASC"
+      )
+      .all(order.id);
+    return { ...order, items, payments };
   });
 
   res.json(ordersWithItems);
@@ -65,15 +70,27 @@ ro.get("/:id", (req, res) => {
       "SELECT * FROM payments WHERE order_id = ? ORDER BY paid_at ASC, id ASC"
     )
     .all(o.id);
-  res.json({ ...o, items, payments, balance: (o.subtotal - o.discount) - o.total_paid });
+  res.json({
+    ...o,
+    items,
+    payments,
+    balance: o.subtotal - o.discount - o.total_paid,
+  });
 });
 
 ro.post("/", (req, res) => {
-  const { clientId, items = [], deposit = 0, paymentMethod, discount = 0 } = req.body;
+  const {
+    clientId,
+    items = [],
+    deposit = 0,
+    paymentMethod,
+    discount = 0,
+  } = req.body;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items required" });
-  if (!paymentMethod) return res.status(400).json({ error: "paymentMethod required" });
+  if (!paymentMethod)
+    return res.status(400).json({ error: "paymentMethod required" });
 
   const client = db3
     .prepare("SELECT id FROM clients WHERE id = ?")
@@ -142,11 +159,18 @@ ro.post("/", (req, res) => {
 
 ro.put("/:id", (req, res) => {
   const orderId = req.params.id;
-  const { clientId, items = [], deposit = 0, paymentMethod, discount = 0 } = req.body;
+  const {
+    clientId,
+    items = [],
+    deposit = 0,
+    paymentMethod,
+    discount = 0,
+  } = req.body;
   if (!clientId) return res.status(400).json({ error: "clientId required" });
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items required" });
-  if (!paymentMethod) return res.status(400).json({ error: "paymentMethod required" });
+  if (!paymentMethod)
+    return res.status(400).json({ error: "paymentMethod required" });
 
   const client = db3
     .prepare("SELECT id FROM clients WHERE id = ?")
@@ -174,9 +198,17 @@ ro.put("/:id", (req, res) => {
     db3.prepare("DELETE FROM order_items WHERE order_id = ?").run(orderId);
 
     // Update order details
-    db3.prepare(
-      "UPDATE orders SET client_id = ?, deposit_paid = ?, discount = ?, payment_method = ? WHERE id = ?"
-    ).run(clientId, Number(deposit || 0), Number(discount || 0), paymentMethod, orderId);
+    db3
+      .prepare(
+        "UPDATE orders SET client_id = ?, deposit_paid = ?, discount = ?, payment_method = ? WHERE id = ?"
+      )
+      .run(
+        clientId,
+        Number(deposit || 0),
+        Number(discount || 0),
+        paymentMethod,
+        orderId
+      );
 
     // Insert new items
     const insItem = db3.prepare(
@@ -208,13 +240,21 @@ ro.put("/:id", (req, res) => {
 
     // Update deposit payment (assuming only one deposit payment)
     const existingDeposit = db3
-      .prepare("SELECT id FROM payments WHERE order_id = ? AND note = 'Deposit'")
+      .prepare(
+        "SELECT id FROM payments WHERE order_id = ? AND note = 'Deposit'"
+      )
       .get(orderId);
     if (Number(deposit) > 0) {
       if (existingDeposit) {
-        db3.prepare("UPDATE payments SET amount = ? WHERE id = ?").run(Number(deposit), existingDeposit.id);
+        db3
+          .prepare("UPDATE payments SET amount = ? WHERE id = ?")
+          .run(Number(deposit), existingDeposit.id);
       } else {
-        db3.prepare("INSERT INTO payments(order_id, amount, note) VALUES (?, ?, ?)").run(orderId, Number(deposit), "Deposit");
+        db3
+          .prepare(
+            "INSERT INTO payments(order_id, amount, note) VALUES (?, ?, ?)"
+          )
+          .run(orderId, Number(deposit), "Deposit");
       }
     } else if (existingDeposit) {
       db3.prepare("DELETE FROM payments WHERE id = ?").run(existingDeposit.id);
@@ -226,7 +266,9 @@ ro.put("/:id", (req, res) => {
 
   try {
     const updatedOrderId = trx();
-    const saved = db3.prepare("SELECT * FROM orders WHERE id = ?").get(updatedOrderId);
+    const saved = db3
+      .prepare("SELECT * FROM orders WHERE id = ?")
+      .get(updatedOrderId);
     res.json(saved);
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });

@@ -219,25 +219,29 @@
                     <div class="col-md-3">
                         <label for="reportClient" class="form-label">Client</label>
                         <select id="reportClient" class="form-select">
-                        <option value="">All clients</option>
+                          <option value="">All clients</option>
                         </select>
                     </div>
                     <div class="col-md-3"><input class="form-control" id="from" type="date" /></div>
                     <div class="col-md-3"><input class="form-control" id="to" type="date" /></div>
-                    <div class="col-md-3 d-grid"><button id="loadProfit" class="btn btn-outline-primary">Load
-                            Profit</button></div>
+                    <div class="col-md-3 d-grid">
+                        <button id="loadProfit" class="btn btn-outline-primary">Load Profit</button>
+                    </div>
                 </div>
                 <hr />
                 <div id="profitTotals" class="mb-3"></div>
                 <table class="table table-sm" id="outstandingTable">
                     <thead>
                         <tr>
-                            <th>Order</th>
+                            <th>ID</th>
                             <th>Client</th>
                             <th>Subtotal</th>
+                            <th>Discount</th>
                             <th>Paid</th>
                             <th>Balance</th>
+                            <th>Payment Method</th>
                             <th>Date</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -245,9 +249,11 @@
                         <tr>
                             <td colspan="2" class="text-end fw-bold">Total</td>
                             <td id="reportTotalSubtotal" class="fw-bold"></td>
+                            <td id="reportTotalDiscount" class="fw-bold"></td>
                             <td id="reportTotalPaid" class="fw-bold"></td>
                             <td id="reportTotalBalance" class="fw-bold text-danger"></td>
                             <td></td>
+                            <td colspan="2"></td>
                         </tr>
                     </tfoot>
                 </table>
