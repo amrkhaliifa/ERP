@@ -1,5 +1,0 @@
-- [x] Enhance /profit endpoint in reports.js to include payment_method breakdown
-- [x] Update frontend loadProfit in app.js to display payment method breakdown
-- [x] Add "Add Payment" button in outstanding table in index.html
-- [x] Add addPaymentFromReports function in app.js to handle adding payments from reports tab
-- [ ] Test the new features
